@@ -25,8 +25,8 @@ queue is done.
 
 - **CPU budget:** the render thread uses at most `renderCpuShare` of one core (default 25%). It works in slices of a
   few milliseconds and sleeps in between, while building geometry, drawing and shading.
-- **Backing off:** if a server tick takes longer than 25 ms, or starts late (for example because of garbage
-  collection or world generation), the render and the chunk loader pause for a second.
+- **Backing off:** if a server tick takes longer than 25 ms, or starts more than 30 ms late (for example because of
+  garbage collection or world generation), the render and the chunk loader pause for a second.
 - **Gradual chunk loading:** at most 4 chunk requests are outstanding at once, and new ones are only made while the
   server keeps up. While it's busy, one chunk per second is still requested, so a permanently busy server finishes
   eventually.

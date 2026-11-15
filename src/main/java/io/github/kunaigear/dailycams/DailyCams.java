@@ -42,7 +42,11 @@ public final class DailyCams implements ModInitializer {
 
     /** A tick slower than this, or a gap between tick starts longer than this, counts as the server struggling. */
     private static final long SLOW_TICK_NANOS = 25_000_000;
-    private static final long TICK_GAP_NANOS = 60_000_000;
+    /**
+     * 30 ms later than the normal 50 ms. Windows sleeps in steps of 15.6 ms by default, so on a Windows host a
+     * perfectly healthy server often starts ticks after 62.5 ms. That must not count as struggling.
+     */
+    private static final long TICK_GAP_NANOS = 80_000_000;
     /** After the server struggled, background work stays paused this long. */
     private static final long BUSY_COOLDOWN_NANOS = 1_000_000_000;
 

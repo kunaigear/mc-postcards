@@ -9,6 +9,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.server.level.TicketType;
 import net.minecraft.world.level.ChunkPos;
 import org.jetbrains.annotations.Nullable;
@@ -175,7 +176,8 @@ public final class RenderQueue {
                         phase = Phase.SETTLING;
                         settleUntil = now + SETTLE_TICKS;
                     } else if (now - lastProgressTick > request.config.chunkLoadTimeoutSeconds * 20) {
-                        DailyCams.LOGGER.warn("Chunk loading for camera '{}' made no progress for {}s; rendering with what is loaded",
+                        DailyCams.LOGGER.warn("Chunk loading for camera '{}' made no progress for {}s; rendering with what is loaded. "
+                                        + "Chunks that didn't load are left out of the picture.",
                                 request.camera.name, request.config.chunkLoadTimeoutSeconds);
                         phase = Phase.SETTLING;
                         settleUntil = now;
@@ -185,9 +187,15 @@ public final class RenderQueue {
                     if (now >= settleUntil) {
                         phase = Phase.RENDERING;
                         CameraSpec c = request.camera;
+                        // The render thread can't ask the chunk system, so tell it which chunks didn't load.
+                        LongOpenHashSet missing = new LongOpenHashSet();
+                        var source = level.getChunkSource();
+                        for (ChunkPos p : toLoad) {
+                            if (source.getChunkNow(p.x(), p.z()) == null) missing.add(p.pack());
+                        }
                         long started = System.nanoTime();
                         CompletableFuture
-                                .supplyAsync(() -> CameraRenderer.render(level, c.x, c.y, c.z, c.yaw, c.pitch, settings), renderExecutor)
+                                .supplyAsync(() -> CameraRenderer.render(level, c.x, c.y, c.z, c.yaw, c.pitch, settings, missing), renderExecutor)
                                 .whenComplete((image, error) -> server.execute(() -> onRendered(image, error, started)));
                     }
                 }

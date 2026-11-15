@@ -6,8 +6,10 @@ import io.github.kunaigear.dailycams.mixin.ChunkMeshInvoker;
 import de.tomalbrc.cameraobscura.renderer.ChunkMeshCache;
 import de.tomalbrc.cameraobscura.renderer.WorldRenderer;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongSet;
 import io.github.kunaigear.dailycams.config.DailyCamsConfig;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -34,7 +36,9 @@ final class CameraRenderer {
         return ChunkMeshCache.toChunkCoord(renderDistance + ChunkMeshCache.CHUNK_SIZE - 1);
     }
 
-    static BufferedImage render(ServerLevel level, double x, double y, double z, float yaw, float pitch, Settings s) {
+    /** {@code missingColumns} holds {@link ChunkPos#pack} keys of chunks that didn't load; they're left out. */
+    static BufferedImage render(ServerLevel level, double x, double y, double z, float yaw, float pitch, Settings s,
+                                LongSet missingColumns) {
         ViewVolume view = new ViewVolume(level, x, y, z, yaw, pitch, s);
         Throttle.begin(s.cpuShare());
         stage = "building";
@@ -44,7 +48,7 @@ final class CameraRenderer {
             // Sections that can't appear in the picture (outside the view cone, beyond the view distance or
             // outside the build height) get an empty mesh instead. Building is by far the most expensive step.
             long meshStart = System.nanoTime();
-            int built = 0;
+            int built = 0, skipped = 0;
             Long2ObjectOpenHashMap<ChunkMeshCache.ChunkMesh> meshes = new Long2ObjectOpenHashMap<>();
             for (int dx = -view.radius; dx <= view.radius; dx++) {
                 for (int dy = -view.radius; dy <= view.radius; dy++) {
@@ -52,7 +56,12 @@ final class CameraRenderer {
                         int sx = view.cx + dx, sy = view.cy + dy, sz = view.cz + dz;
                         long key = ChunkMeshCache.chunkKeyFromCoords(sx, sy, sz);
                         ChunkMeshCache.ChunkMesh mesh = ChunkMeshInvoker.dailycams$create(ChunkMeshCache.chunkOriginFromKey(key), key);
-                        if (view.sectionVisible(sx, sy, sz)) {
+                        boolean visible = view.sectionVisible(sx, sy, sz);
+                        if (visible && missingColumns.contains(ChunkPos.pack(sx, sz))) {
+                            visible = false;
+                            skipped++;
+                        }
+                        if (visible) {
                             ChunkMeshCacheInvoker.dailycams$rebuildChunk(level, mesh);
                             built++;
                             Throttle.checkpoint();
@@ -64,6 +73,9 @@ final class CameraRenderer {
                 }
             }
             long meshMs = (System.nanoTime() - meshStart) / 1_000_000;
+            if (skipped > 0) {
+                DailyCams.LOGGER.warn("Left out {} chunk sections from {} chunks that didn't load", skipped, missingColumns.size());
+            }
 
             PinnedMeshes.pin(level, meshes);
             try {
