@@ -69,7 +69,7 @@ val devtest: SourceSet by sourceSets.creating {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Optional client helper (its own jar): rewrites /dailycam set to use the freecam view.
+// Optional client helper (its own jar): fills in the player's FOV and freecam view for /dailycam set.
 // It doesn't use any of the server mod's code.
 val client: SourceSet by sourceSets.creating {
     compileClasspath += sourceSets.main.get().compileClasspath

@@ -3,7 +3,7 @@
   "id": "dailycams-client",
   "version": "${version}",
   "name": "Daily Cams Client",
-  "description": "Optional client helper for Daily Cams: /dailycam set places the camera where your freecam is, not where your body is.",
+  "description": "Optional client helper for Daily Cams: /dailycam set uses your FOV setting, and with a freecam mod places the camera where your view is, not where your body is.",
   "authors": ["kunaigear"],
   "license": "MIT",
   "environment": "client",

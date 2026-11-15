@@ -13,7 +13,7 @@ You need JDK 25. Loom requires Gradle itself to run on Java 25.
 This builds two jars in `build/libs/`:
 
 - `daily-cams-<version>+<minecraft>.jar`: the server mod (`src/main`).
-- `daily-cams-client-<version>+<minecraft>.jar`: the optional client helper for Freecam (`src/client`). It only
+- `daily-cams-client-<version>+<minecraft>.jar`: the optional client helper for Freecam and the player's FOV (`src/client`). It only
   depends on Fabric API and shares no code with the server mod.
 
 ## Test servers

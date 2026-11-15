@@ -52,6 +52,9 @@ public final class DevTest implements ModInitializer {
         as(server, level, alice, "dcam list");
         as(server, level, alice, "dcam set Alice 10 100 10 90 0");
         as(server, level, alice, "dcam");
+        as(server, level, alice, "dailycam set Alice 10 100 10 90 0 85");
+        as(server, level, alice, "dailycam set Alice 10 100 10 90 0 200");
+        as(server, level, alice, "dailycam info");
         as(server, level, alice, "dailycam webhook Alice http://example.com/x");
 
         LOG.info("===== tier 4: Carol =====");

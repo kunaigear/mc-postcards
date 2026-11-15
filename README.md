@@ -6,7 +6,7 @@
 ![A village by the water, rendered by Daily Cams](docs/images/village.jpg)
 
 - **Server-side only:** no bot account joins and players don't need any mods. Vanilla clients work.
-  An optional client helper lets players [place cameras with Freecam](docs/usage.md#placing-a-camera-with-freecam).
+  An optional client helper places cameras with [Freecam and the player's own FOV](docs/usage.md#client-helper-freecam-and-your-field-of-view).
 - **Real 3D renders**, made on the server by [Camera Obscura](https://modrinth.com/mod/camera-obscura): 1920×1080,
   16 chunks of view distance, plus an optional shader with sun shadows.
 - **One camera per player**, named after them. Staff can add named cameras.

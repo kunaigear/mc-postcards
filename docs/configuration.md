@@ -42,7 +42,7 @@ Every post is an embed with the picture, the camera name, its coordinates and di
 | `timeZone` | `""` | For example `Europe/Berlin`. If empty, the server's time zone is used. |
 | `catchUpMissedRuns` | `true` | If the server was offline at a scheduled time, render as soon as it's back. |
 | `width`, `height` | `1920`, `1080` | Picture size. |
-| `fov` | `70` | Default field of view in degrees. Cameras can override it with `/dailycam fov`. |
+| `fov` | `70` | Default field of view in degrees. Cameras can override it with `/dailycam fov`; with the client helper, new placements use the player's FOV. |
 | `renderDistance` | `16` | View distance in chunks (2–32), like Minecraft's own setting. See [Performance](performance.md#render-distance). |
 | `ssaa` | `2` | Supersampling factor for smoother edges (1 = off). |
 | `shader` | `"simple"` | `simple` or `none`. See [Shader](shader.md). |

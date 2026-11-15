@@ -34,8 +34,8 @@ permission API, so LuckPerms and similar mods can grant these nodes instead of o
 | Command | Who | What it does |
 |---|---|---|
 | `/dailycam set` | everyone | Places your personal camera at your eyes, looking where you look. Run it again to move it. |
-| `/dailycam set <your name> <x y z> <yaw pitch>` | everyone | Places your personal camera at an exact position. `~` works. The dimension is the one you're in, or use `/execute in`. |
-| `/dailycam set <name> [<x y z> <yaw pitch>]` | elevated | Creates or moves a named camera. |
+| `/dailycam set <your name> <x y z> <yaw pitch> [fov]` | everyone | Places your personal camera at an exact position, optionally with a field of view (30–110). `~` works. The dimension is the one you're in, or use `/execute in`. |
+| `/dailycam set <name> [<x y z> <yaw pitch> [fov]]` | elevated | Creates or moves a named camera. |
 | `/dailycam list` | everyone | Lists your cameras, with clickable `[test]` and `[remove]` buttons. Admins see all cameras. |
 | `/dailycam status` | everyone | Shows the next scheduled run, the queue and how many cameras you have. |
 | `/dailycam info [name]` | everyone | Shows a camera's details. |
@@ -53,35 +53,38 @@ permission API, so LuckPerms and similar mods can grant these nodes instead of o
 If you leave out `[name]`, the command uses your personal camera. From the server console, always give a name
 (and, for `/dailycam set`, a position and rotation).
 
-## Placing a camera with Freecam
+## Client helper: Freecam and your field of view
 
-The server only knows where your body is. If you fly around with [Freecam](https://modrinth.com/mod/freecam) and
-run `/dailycam set`, the camera ends up at your body, not at the view on your screen.
+The server only knows where your body is and nothing about your game settings. The optional client helper fills
+in the rest when you place a camera.
 
 Install `daily-cams-client-<version>.jar` from the
-[releases](https://github.com/kunaigear/mc-postcards/releases) on your client, next to Freecam (it needs
-Fabric API). Then:
+[releases](https://github.com/kunaigear/mc-postcards/releases) on your client (it needs Fabric API). Use the
+same version as the server. Then `/dailycam set` and `/dailycam set <name>` work as before, with two differences:
 
-1. Turn on Freecam and fly to the view you want.
-2. Run `/dailycam set`, or `/dailycam set <name>` for a named camera.
+- **Your field of view:** the camera uses your FOV setting from *Options*, so the picture shows as much as you
+  saw on screen. This also applies when you give a position, unless you add a FOV at the end yourself.
+- **Freecam:** with [Freecam](https://modrinth.com/mod/freecam) turned on, the camera is placed at your freecam
+  view instead of your body, and chat shows *Using your freecam view*. Fly to the view you want, then run the
+  command.
 
-The helper turns that into `/dailycam set <name> <x y z> <yaw pitch>` with the position and direction of your
-view, and shows *Using your freecam view* in chat. The server needs nothing extra, and the usual permissions and
-limits apply. Without Freecam turned on, nothing changes.
+Before the command is sent, the helper turns it into `/dailycam set <name> <x y z> <yaw pitch> <fov>`. That's a
+normal command, so the server needs nothing extra and the usual permissions and limits apply.
 
-- The helper also works while spectating a mob in spectator mode, and with other freecam mods that move the
+- The freecam part also works while spectating a mob in spectator mode, and with other freecam mods that move the
   camera more than a block or two away from your body. Third-person view is left alone.
-- Your body stays where you left it, so it can show up in a **[Preview now]** picture. Later pictures show
-  whoever happens to be there.
+- With Freecam, your body stays where you left it, so it can show up in a **[Preview now]** picture. Later
+  pictures show whoever happens to be there.
 - **Spectator mode** works without the helper, because the server knows where a spectator is.
-- **Without the helper**, read the freecam position from the F3 screen and type it in:
-  `/dailycam set <your name> <x y z> <yaw pitch>`. With Freecam, the view is 0.4 blocks above the position F3
-  shows, so add 0.4 to `y`.
+- **Without the helper**, cameras use the server's default FOV (`/dailycam fov` changes it per camera). For a
+  freecam view, read the position from the F3 screen and type it in: `/dailycam set <your name> <x y z> <yaw pitch>`.
+  With Freecam, the view is 0.4 blocks above the position F3 shows, so add 0.4 to `y`.
 
 ## Tips
 
 - **Placing a camera:** fly or stand where the view looks best, look at the scene and run `/dailycam set`. The
-  picture uses a 70° field of view, the same as the game's default, in a 16:9 frame.
+  picture is 16:9 and uses a 70° field of view by default, the same as the game's default. With the
+  [client helper](#client-helper-freecam-and-your-field-of-view), it uses your own FOV setting instead.
 - **Preview:** **[Preview now]** in the confirmation message renders immediately. If you're still standing at the
   camera, you're left out of the picture automatically.
 - **Far views:** a camera sees 16 chunks (256 blocks) by default. Terrain further away disappears into fog.

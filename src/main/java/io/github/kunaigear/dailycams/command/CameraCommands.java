@@ -63,7 +63,7 @@ import java.util.function.BiFunction;
  *
  * <pre>
  * /dailycam set                               your personal camera, at your eyes
- * /dailycam set &lt;name&gt; [&lt;x y z&gt; &lt;yaw pitch&gt;]   a named camera (or your personal one, by your name)
+ * /dailycam set &lt;name&gt; [&lt;x y z&gt; &lt;yaw pitch&gt; [fov]]   a named camera (or your personal one, by your name)
  * /dailycam list | status
  * /dailycam info|test|remove [name]          name defaults to your personal camera
  * /dailycam fov &lt;30-110|default&gt; [name]
@@ -76,6 +76,8 @@ public final class CameraCommands {
     /** The command and its short alias. */
     public static final String COMMAND = "dailycam";
     public static final String ALIAS = "dcam";
+    /** Field of view range, the same as Minecraft's own FOV slider. */
+    private static final int MIN_FOV = 30, MAX_FOV = 110;
 
     private static final Identifier PERM_USE = perm("command.use");
     /** Preview renders of your own cameras. Everyone. */
@@ -112,7 +114,9 @@ public final class CameraCommands {
                                 .executes(ctx -> setFromView(ctx, name(ctx)))
                                 .then(Commands.argument("pos", Vec3Argument.vec3())
                                         .then(Commands.argument("rotation", RotationArgument.rotation())
-                                                .executes(CameraCommands::setExplicit)))))
+                                                .executes(ctx -> setExplicit(ctx, null))
+                                                .then(Commands.argument("fov", IntegerArgumentType.integer(MIN_FOV, MAX_FOV))
+                                                        .executes(ctx -> setExplicit(ctx, IntegerArgumentType.getInteger(ctx, "fov"))))))))
                 .then(Commands.literal("help").executes(CameraCommands::help))
                 .then(Commands.literal("list").executes(CameraCommands::list))
                 .then(Commands.literal("status").executes(CameraCommands::status))
@@ -124,7 +128,7 @@ public final class CameraCommands {
                 .then(Commands.literal("fov")
                         .then(optionalName(Commands.literal("default"), CameraCommands::suggestManageable,
                                 (ctx, cam) -> setFov(ctx, cam, null), true))
-                        .then(optionalName(Commands.argument("fov", IntegerArgumentType.integer(30, 110)),
+                        .then(optionalName(Commands.argument("fov", IntegerArgumentType.integer(MIN_FOV, MAX_FOV)),
                                 CameraCommands::suggestManageable,
                                 (ctx, cam) -> setFov(ctx, cam, IntegerArgumentType.getInteger(ctx, "fov")), true)))
                 .then(Commands.literal("shader")
@@ -186,23 +190,24 @@ public final class CameraCommands {
             src.sendFailure(Component.literal("From the console, give a name, position and rotation: /dailycam set <name> <x y z> <yaw pitch>"));
             return 0;
         }
-        return set(src, name, entity.getEyePosition(), entity.getYRot(), entity.getXRot());
+        return set(src, name, entity.getEyePosition(), entity.getYRot(), entity.getXRot(), null);
     }
 
-    private static int setExplicit(CommandContext<CommandSourceStack> ctx) {
+    /** {@code fov} is null when not given: a new camera then uses the default, a moved one keeps its own. */
+    private static int setExplicit(CommandContext<CommandSourceStack> ctx, @Nullable Integer fov) {
         CommandSourceStack src = ctx.getSource();
         Vec3 pos = Vec3Argument.getVec3(ctx, "pos");
         Vec2 rot = RotationArgument.getRotation(ctx, "rotation").getRotation(src); // x = pitch, y = yaw
-        return set(src, name(ctx), pos, rot.y, rot.x);
+        return set(src, name(ctx), pos, rot.y, rot.x, fov);
     }
 
-    private static int set(CommandSourceStack src, @Nullable String name, Vec3 pos, float yaw, float pitch) {
+    private static int set(CommandSourceStack src, @Nullable String name, Vec3 pos, float yaw, float pitch, @Nullable Integer fov) {
         CameraStore store = DailyCams.get().cameras();
         ServerPlayer player = src.getPlayer();
 
         // Your own name (or no name at all) means your personal camera.
         if (player != null && (name == null || name.equalsIgnoreCase(playerName(player)))) {
-            return setPersonal(src, player, pos, yaw, pitch);
+            return setPersonal(src, player, pos, yaw, pitch, fov);
         }
         if (name == null) {
             src.sendFailure(Component.literal("Give the camera a name."));
@@ -215,7 +220,7 @@ public final class CameraCommands {
                 src.sendFailure(Component.literal("Camera '" + existing.name + "' belongs to " + existing.ownerName + "."));
                 return 0;
             }
-            place(existing, src, pos, yaw, pitch);
+            place(existing, src, pos, yaw, pitch, fov);
             store.put(existing);
             confirm(src, existing, false);
             return 1;
@@ -251,13 +256,13 @@ public final class CameraCommands {
         cam.owner = player != null ? player.getUUID() : null;
         cam.ownerName = player != null ? playerName(player) : "Server";
         cam.createdAt = System.currentTimeMillis();
-        place(cam, src, pos, yaw, pitch);
+        place(cam, src, pos, yaw, pitch, fov);
         store.put(cam);
         confirm(src, cam, true);
         return 1;
     }
 
-    private static int setPersonal(CommandSourceStack src, ServerPlayer player, Vec3 pos, float yaw, float pitch) {
+    private static int setPersonal(CommandSourceStack src, ServerPlayer player, Vec3 pos, float yaw, float pitch, @Nullable Integer fov) {
         CameraStore store = DailyCams.get().cameras();
         String name = playerName(player);
         CameraSpec cam = store.personalOf(player.getUUID());
@@ -277,7 +282,7 @@ public final class CameraCommands {
             cam.createdAt = System.currentTimeMillis();
         }
         cam.ownerName = name;
-        place(cam, src, pos, yaw, pitch);
+        place(cam, src, pos, yaw, pitch, fov);
         if (!cam.name.equals(name)) {
             store.rename(cam, name); // the player changed their username
         } else {
@@ -287,7 +292,8 @@ public final class CameraCommands {
         return 1;
     }
 
-    private static void place(CameraSpec cam, CommandSourceStack src, Vec3 pos, float yaw, float pitch) {
+    private static void place(CameraSpec cam, CommandSourceStack src, Vec3 pos, float yaw, float pitch, @Nullable Integer fov) {
+        if (fov != null) cam.fov = fov;
         cam.dimension = src.getLevel().dimension().identifier().toString();
         cam.x = pos.x;
         cam.y = pos.y;
@@ -475,7 +481,7 @@ public final class CameraCommands {
                 .append(Component.literal("\n  /dailycam set").withStyle(ChatFormatting.YELLOW))
                 .append(Component.literal(" - put your camera at your eyes, looking where you look"));
         if (namedLimit(src) > 0) {
-            out.append(Component.literal("\n  /dailycam set <name> [<x y z> <yaw pitch>]").withStyle(ChatFormatting.YELLOW))
+            out.append(Component.literal("\n  /dailycam set <name> [<x y z> <yaw pitch> [fov]]").withStyle(ChatFormatting.YELLOW))
                .append(Component.literal(" - an extra named camera"));
         }
         out.append(Component.literal("\n  /dailycam list | status").withStyle(ChatFormatting.YELLOW))
