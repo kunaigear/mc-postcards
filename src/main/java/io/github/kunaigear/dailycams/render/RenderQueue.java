@@ -84,7 +84,7 @@ public final class RenderQueue {
         return active == null ? null : active.request.camera.name;
     }
 
-    /** "loading", "building", "drawing" or null when idle. For diagnostics. */
+    /** "loading", "building", "drawing", "shading" or null when idle. For diagnostics. */
     public @Nullable String activeStage() {
         if (active == null) return null;
         return active.phase == Phase.RENDERING ? CameraRenderer.stage : "loading";
@@ -141,7 +141,8 @@ public final class RenderQueue {
             DailyCamsConfig cfg = request.config;
             CameraSpec cam = request.camera;
             this.settings = new CameraRenderer.Settings(cfg.width, cfg.height,
-                    cam.fov != null ? cam.fov : cfg.fov, cfg.renderDistanceBlocks(), cfg.ssaa, cfg.renderCpuShare);
+                    cam.fov != null ? cam.fov : cfg.fov, cfg.renderDistanceBlocks(), cfg.ssaa, cfg.renderCpuShare,
+                    "simple".equals(cam.shader != null ? cam.shader : cfg.shader) ? cfg.shaderSettings : null);
             // Only the chunks the camera can actually see (plus a margin), nearest first.
             this.toLoad = new ViewVolume(level, cam.x, cam.y, cam.z, cam.yaw, cam.pitch, settings).columnsToLoad();
             this.lastProgressTick = tick;

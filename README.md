@@ -54,6 +54,7 @@ Online players, existing personal cameras and the server's `usercache.json` are 
 | `/mc_camera test [name]` | owner / admin | Renders and sends a camera right away. Non-admins have a cooldown. |
 | `/mc_camera remove [name]` | owner / admin | Deletes a camera. |
 | `/mc_camera fov <30-110\|default> [name]` | owner / admin | Sets a camera's field of view. |
+| `/mc_camera shader <simple\|none\|default> [name]` | owner / admin | Turns the shader on or off for one camera. |
 | `/mc_camera webhook <name> <url\|default>` | admin | Sends one camera to a different webhook. |
 | `/mc_camera runall` | admin | Renders and sends every camera now. |
 | `/mc_camera reload` | admin | Reloads the config and `cameras.json`. |
@@ -77,6 +78,8 @@ message if they're online (`notifyOwners`).
 | `fov` | `70` | Default field of view. |
 | `renderDistance` | `16` | View distance in chunks (2–32), like Minecraft's own setting. Higher values are slower and load more chunks. |
 | `ssaa` | `2` | Supersampling (1 = off). |
+| `shader` | `"simple"` | `simple` adds sun shadows, warm light, haze, bloom and a colour grade (see [Shader](#shader)). `none` gives plain Camera Obscura output. |
+| `shaderSettings` | | Strength of each shader effect: `shadowStrength`, `sunWarmth`, `haze`, `bloom`, `saturation`, `contrast`, `vignette`. |
 | `renderCpuShare` | `0.25` | How much of one CPU core a render may use (0.05–1.0). Lower values make renders slower and lighter on the server. See [Server performance](#server-performance). |
 | `imageFormat` | `"png"` | `png` or `jpg`. A PNG larger than `maxUploadBytes` is sent as a JPEG instead. |
 | `maxUploadBytes` | ~10 MB | Discord's default upload limit for webhooks. |
@@ -105,6 +108,22 @@ restarts neither skip a run nor repeat one.
 The dedicated server's `pause-when-empty-seconds` would stop the game from ticking on an empty server. The
 schedule therefore runs on a wall-clock timer, and while renders are queued the mod keeps the server from
 pausing. Afterwards it may pause again.
+
+## Shader
+
+With `"shader": "simple"` (the default), a post-processing pass runs after Camera Obscura has drawn the frame:
+
+- **Sun shadows:** each pixel's world position is reconstructed from the depth buffer, and a ray is traced towards
+  the sun through the world's blocks. Opaque blocks and leaves cast shadows. Shadows are scaled by the sky
+  light at that spot, so caves and interiors aren't darkened twice. They fade out as the sun sets, and there are
+  none at night.
+- **Light colour:** sunlit surfaces get a warm tint and shadows a cool, slightly blue one.
+- **Haze, bloom and grading:** distant terrain fades a little towards the sky colour, bright areas get a soft glow,
+  and a light contrast/saturation grade and a vignette finish the picture.
+
+It adds 1–4 seconds per camera. The pass yields to the server like the rest of the render: in the 2-core test
+below, the shading phase caused no hitches at all. Every strength can be tuned in `shaderSettings`, and
+`/mc_camera shader none` turns it off for a single camera.
 
 ## Server performance
 

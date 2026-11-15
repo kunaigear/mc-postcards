@@ -6,7 +6,11 @@ import io.github.kunaigear.dailycams.mixin.ChunkMeshInvoker;
 import de.tomalbrc.cameraobscura.renderer.ChunkMeshCache;
 import de.tomalbrc.cameraobscura.renderer.WorldRenderer;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import io.github.kunaigear.dailycams.config.DailyCamsConfig;
 import net.minecraft.server.level.ServerLevel;
+import org.jetbrains.annotations.Nullable;
+import org.joml.Matrix4d;
+import org.joml.Vector3d;
 
 import java.awt.image.BufferedImage;
 import java.util.List;
@@ -19,7 +23,8 @@ final class CameraRenderer {
     static volatile String stage = "building";
 
     /** {@code renderDistance} is in blocks. {@code cpuShare} limits how much of one core the render may use. */
-    record Settings(int width, int height, int fov, int renderDistance, int ssaa, double cpuShare) {}
+    record Settings(int width, int height, int fov, int renderDistance, int ssaa, double cpuShare,
+                    @Nullable DailyCamsConfig.ShaderSettings shader) {}
 
     /** Chunk radius Camera Obscura looks at for a given view distance (mirrors WorldRenderer). */
     static int chunkRadius(int renderDistance) {
@@ -67,8 +72,15 @@ final class CameraRenderer {
                 renderer.updateChunksInRange(level, false);
                 BufferedImage image = renderer.render();
                 long drawMs = (System.nanoTime() - drawStart) / 1_000_000;
-                DailyCams.LOGGER.info("Built {} chunk sections in {} ms, drew the frame in {} ms ({} ms in total spent yielding to the server)",
-                        built, meshMs, drawMs, Throttle.sleptMs());
+                long shadeMs = 0;
+                if (s.shader() != null) {
+                    stage = "shading";
+                    long shadeStart = System.nanoTime();
+                    SimpleShader.apply(image, renderer.frame(), level, s.shader());
+                    shadeMs = (System.nanoTime() - shadeStart) / 1_000_000;
+                }
+                DailyCams.LOGGER.info("Built {} chunk sections in {} ms, drew the frame in {} ms, shader {} ms ({} ms in total spent yielding to the server)",
+                        built, meshMs, drawMs, shadeMs, Throttle.sleptMs());
                 return image;
             } finally {
                 PinnedMeshes.clear();
@@ -83,6 +95,13 @@ final class CameraRenderer {
         Renderer(ServerLevel level, Settings s) {
             super(level, s.width(), s.height(), s.renderDistance(), s.ssaa());
             camera.setPerspective(Math.toRadians(s.fov()), (double) s.width() / s.height(), 0.1f, s.renderDistance());
+        }
+
+        /** What the post-processing shader needs from the frame that was just drawn. */
+        SimpleShader.Frame frame() {
+            Matrix4d inverseViewProjection = new Matrix4d(camera.getProjectionMatrix()).mul(new Matrix4d(camera.getViewMatrix())).invert();
+            return new SimpleShader.Frame(rasterizer.getFramebuffer(), scale, inverseViewProjection,
+                    new Vector3d(camera.getPosition()), uniforms.fogStart, uniforms.fogEnd, uniforms.fogColor);
         }
     }
 }

@@ -124,6 +124,13 @@ public final class CameraCommands {
                         .then(optionalName(Commands.argument("fov", IntegerArgumentType.integer(30, 110)),
                                 CameraCommands::suggestManageable,
                                 (ctx, cam) -> setFov(ctx, cam, IntegerArgumentType.getInteger(ctx, "fov")), true)))
+                .then(Commands.literal("shader")
+                        .then(optionalName(Commands.literal("simple"), CameraCommands::suggestManageable,
+                                (ctx, cam) -> setShader(ctx, cam, "simple"), true))
+                        .then(optionalName(Commands.literal("none"), CameraCommands::suggestManageable,
+                                (ctx, cam) -> setShader(ctx, cam, "none"), true))
+                        .then(optionalName(Commands.literal("default"), CameraCommands::suggestManageable,
+                                (ctx, cam) -> setShader(ctx, cam, null), true)))
                 .then(Commands.literal("webhook")
                         .requires(PermissionPredicates.<CommandSourceStack>require(PERM_ADMIN, LEVEL_ADMIN))
                         .then(nameArg(CameraCommands::suggestAll)
@@ -340,7 +347,8 @@ public final class CameraCommands {
                 .append(Component.literal(cam.personal ? "  (personal)" : "  (named)").withStyle(ChatFormatting.GRAY))
                 .append(Component.literal("\n  Owner: " + cam.ownerName))
                 .append(Component.literal("\n  Position: " + cam.describePosition()))
-                .append(Component.literal("\n  FOV: " + (cam.fov != null ? cam.fov : cfg.fov + " (default)")));
+                .append(Component.literal("\n  FOV: " + (cam.fov != null ? cam.fov : cfg.fov + " (default)")))
+                .append(Component.literal("\n  Shader: " + (cam.shader != null ? cam.shader : cfg.shader + " (default)")));
         if (isAdmin(src)) {
             out.append(Component.literal("\n  Webhook: " + (cam.webhookUrl != null ? redact(cam.webhookUrl) : "default")));
         }
@@ -359,6 +367,14 @@ public final class CameraCommands {
         DailyCams.get().cameras().put(cam);
         ctx.getSource().sendSuccess(() -> Component.literal("Field of view of '" + cam.name + "' is now "
                 + (fov == null ? "the default (" + DailyCams.get().config().fov + ")" : fov) + "."), false);
+        return 1;
+    }
+
+    private static int setShader(CommandContext<CommandSourceStack> ctx, CameraSpec cam, @Nullable String shader) {
+        cam.shader = shader;
+        DailyCams.get().cameras().put(cam);
+        ctx.getSource().sendSuccess(() -> Component.literal("Shader of '" + cam.name + "' is now "
+                + (shader == null ? "the default (" + DailyCams.get().config().shader + ")" : shader) + "."), false);
         return 1;
     }
 
@@ -455,7 +471,8 @@ public final class CameraCommands {
         }
         out.append(Component.literal("\n  /mc_camera list | status").withStyle(ChatFormatting.YELLOW))
            .append(Component.literal("\n  /mc_camera test | info | remove [name]").withStyle(ChatFormatting.YELLOW))
-           .append(Component.literal("\n  /mc_camera fov <30-110|default> [name]").withStyle(ChatFormatting.YELLOW));
+           .append(Component.literal("\n  /mc_camera fov <30-110|default> [name]").withStyle(ChatFormatting.YELLOW))
+           .append(Component.literal("\n  /mc_camera shader <simple|none|default> [name]").withStyle(ChatFormatting.YELLOW));
         if (isAdmin(src)) {
             out.append(Component.literal("\n  /mc_camera webhook <name> <url|default> | runall | reload").withStyle(ChatFormatting.RED));
         }

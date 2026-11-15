@@ -45,6 +45,26 @@ public final class DailyCamsConfig {
      */
     public double renderCpuShare = 0.25;
 
+    /** "simple" (sun shadows, warm light, haze, bloom, colour grade) or "none" (plain Camera Obscura output). */
+    public String shader = "simple";
+    public ShaderSettings shaderSettings = new ShaderSettings();
+
+    /** Knobs for the "simple" shader. */
+    public static final class ShaderSettings {
+        /** How dark shadows from the sun get (0 = none, 1 = black). */
+        public double shadowStrength = 0.42;
+        /** Warm tint on sunlit surfaces. */
+        public double sunWarmth = 0.10;
+        /** How much distant terrain fades towards the sky colour. */
+        public double haze = 0.18;
+        /** Glow around bright areas. */
+        public double bloom = 0.22;
+        public double saturation = 1.12;
+        public double contrast = 1.06;
+        /** Darkening towards the corners. */
+        public double vignette = 0.22;
+    }
+
     /** "png" or "jpg". PNG falls back to JPEG automatically when it is larger than maxUploadBytes. */
     public String imageFormat = "png";
     public float jpegQuality = 0.9f;
@@ -113,6 +133,21 @@ public final class DailyCamsConfig {
         imageFormat = imageFormat == null ? "png" : imageFormat.toLowerCase(Locale.ROOT);
         if (imageFormat.equals("jpeg")) imageFormat = "jpg";
         if (!imageFormat.equals("png") && !imageFormat.equals("jpg")) imageFormat = "png";
+
+        shader = shader == null ? "simple" : shader.toLowerCase(Locale.ROOT);
+        if (!shader.equals("simple") && !shader.equals("none")) {
+            DailyCams.LOGGER.warn("Unknown shader '{}', using 'simple'", shader);
+            shader = "simple";
+        }
+        if (shaderSettings == null) shaderSettings = new ShaderSettings();
+        ShaderSettings ss = shaderSettings;
+        ss.shadowStrength = Mth.clamp(ss.shadowStrength, 0, 1);
+        ss.sunWarmth = Mth.clamp(ss.sunWarmth, 0, 0.5);
+        ss.haze = Mth.clamp(ss.haze, 0, 1);
+        ss.bloom = Mth.clamp(ss.bloom, 0, 2);
+        ss.saturation = Mth.clamp(ss.saturation, 0, 2);
+        ss.contrast = Mth.clamp(ss.contrast, 0.5, 2);
+        ss.vignette = Mth.clamp(ss.vignette, 0, 1);
 
         if (scheduleTimes == null) scheduleTimes = new ArrayList<>();
         List<LocalTime> times = new ArrayList<>();

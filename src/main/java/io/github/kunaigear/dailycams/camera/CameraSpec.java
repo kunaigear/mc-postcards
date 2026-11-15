@@ -24,6 +24,8 @@ public final class CameraSpec {
     public @Nullable Integer fov;
     /** Null = config default. */
     public @Nullable String webhookUrl;
+    /** "simple" or "none"; null = config default. */
+    public @Nullable String shader;
     public long createdAt;
 
     public CameraSpec copy() {
@@ -40,6 +42,7 @@ public final class CameraSpec {
         c.pitch = pitch;
         c.fov = fov;
         c.webhookUrl = webhookUrl;
+        c.shader = shader;
         c.createdAt = createdAt;
         return c;
     }
