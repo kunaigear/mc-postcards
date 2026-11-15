@@ -3,7 +3,7 @@
 [← Back to the README](../README.md)
 
 Daily Cams runs only on the server. Players don't need it, and the only thing it sends them is chat messages.
-Vanilla clients can join.
+Vanilla clients can join. The client helper for [Freecam](usage.md#placing-a-camera-with-freecam) is optional.
 
 ## Tested mods
 
@@ -18,6 +18,9 @@ These ran together on a production Fabric 26.3 server (Loader 0.20.1), with a pl
 | Voxy 0.2.20-beta + Sodium | client | Works. Voxy is a client mod and isn't needed on the server. |
 
 ModernFix had no 26.3 build at the time of testing.
+
+[Freecam](https://modrinth.com/mod/freecam) 1.5.1 on the client works with the optional Daily Cams client helper,
+which places cameras at the freecam view. See [placing a camera with Freecam](usage.md#placing-a-camera-with-freecam).
 
 ## Voxy
 

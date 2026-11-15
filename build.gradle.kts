@@ -68,10 +68,33 @@ val devtest: SourceSet by sourceSets.creating {
     runtimeClasspath += sourceSets.main.get().runtimeClasspath + sourceSets.main.get().output
 }
 
+// ---------------------------------------------------------------------------------------------
+// Optional client helper (its own jar): rewrites /mc_setcamera to use the freecam view.
+// It doesn't use any of the server mod's code.
+val client: SourceSet by sourceSets.creating {
+    compileClasspath += sourceSets.main.get().compileClasspath
+    runtimeClasspath += sourceSets.main.get().runtimeClasspath
+}
+
+tasks.named<ProcessResources>("processClientResources") {
+    val props = mapOf("version" to project.version, "minecraft_version" to p("minecraft_version"))
+    inputs.properties(props)
+    filesMatching("fabric.mod.json") { expand(props) }
+}
+
+val clientJar = tasks.register<Jar>("clientJar") {
+    archiveBaseName = "daily-cams-client"
+    from(client.output)
+    from("LICENSE")
+}
+
+tasks.assemble { dependsOn(clientJar) }
+
 loom {
     mods {
         register("dailycams") { sourceSet(sourceSets.main.get()) }
         register("dailycams-devtest") { sourceSet(devtest) }
+        register("dailycams-client") { sourceSet(client) }
     }
     runs {
         register("devtestServer") {

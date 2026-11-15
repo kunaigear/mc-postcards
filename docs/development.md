@@ -10,7 +10,11 @@ You need JDK 25. Loom requires Gradle itself to run on Java 25.
 ./gradlew build
 ```
 
-The jar is written to `build/libs/daily-cams-<version>+<minecraft>.jar`.
+This builds two jars in `build/libs/`:
+
+- `daily-cams-<version>+<minecraft>.jar`: the server mod (`src/main`).
+- `daily-cams-client-<version>+<minecraft>.jar`: the optional client helper for Freecam (`src/client`). It only
+  depends on Fabric API and shares no code with the server mod.
 
 ## Test servers
 
@@ -48,5 +52,5 @@ Releases are built by the Gitea workflow in `.gitea/workflows/release.yml`.
 1. Set `mod_version` in `gradle.properties` and describe the release in `CHANGELOG.md`.
 2. Commit, then push a tag that matches: `git tag v1.2.3 && git push origin v1.2.3`.
 
-The workflow checks that the tag matches `mod_version`, builds the mod, and publishes a release with the jar and
+The workflow checks that the tag matches `mod_version`, builds the mod, and publishes a release with both jars and
 `SHA256_CHECKSUM.txt`, using `CHANGELOG.md` as the release text.

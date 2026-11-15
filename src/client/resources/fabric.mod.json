@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "dailycams-client",
+  "version": "${version}",
+  "name": "Daily Cams Client",
+  "description": "Optional client helper for Daily Cams: /mc_setcamera places the camera where your freecam is, not where your body is.",
+  "authors": ["kunaigear"],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["io.github.kunaigear.dailycams.client.DailyCamsClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "fabric-api": "*",
+    "minecraft": "~${minecraft_version}",
+    "java": ">=25"
+  },
+  "suggests": {
+    "freecam": "*"
+  }
+}
