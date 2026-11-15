@@ -36,9 +36,12 @@ final class CameraRenderer {
         return ChunkMeshCache.toChunkCoord(renderDistance + ChunkMeshCache.CHUNK_SIZE - 1);
     }
 
-    /** {@code missingColumns} holds {@link ChunkPos#pack} keys of chunks that didn't load; they're left out. */
+    /**
+     * {@code missingColumns} holds {@link ChunkPos#pack} keys of chunks that didn't load; they're left out.
+     * {@code hidden} is left out of the picture (see {@link #entityAtCamera}).
+     */
     static BufferedImage render(ServerLevel level, double x, double y, double z, float yaw, float pitch, Settings s,
-                                LongSet missingColumns) {
+                                LongSet missingColumns, @Nullable Entity hidden) {
         ViewVolume view = new ViewVolume(level, x, y, z, yaw, pitch, s);
         Throttle.begin(s.cpuShare());
         stage = "building";
@@ -85,7 +88,7 @@ final class CameraRenderer {
                 renderer.updateCamera(x, y, z, pitch, yaw);
                 // Someone standing where the camera is (typically its owner right after placing it) would
                 // otherwise fill the picture with the inside of their own head.
-                renderer.entity = entityAtCamera(level, x, y, z);
+                renderer.entity = hidden;
                 // Every mesh is pinned and clean, so this only reads the sky/fog/sun values for the frame.
                 renderer.updateChunksInRange(level, false);
                 BufferedImage image = renderer.render();
@@ -108,8 +111,11 @@ final class CameraRenderer {
         }
     }
 
-    /** The entity whose body contains the camera position, if any (closest eye wins). */
-    private static @Nullable Entity entityAtCamera(ServerLevel level, double x, double y, double z) {
+    /**
+     * The entity whose body contains the camera position, if any (closest eye wins). Call on the server thread:
+     * entity lookups aren't safe from other threads.
+     */
+    static @Nullable Entity entityAtCamera(ServerLevel level, double x, double y, double z) {
         Vec3 cam = new Vec3(x, y, z);
         Entity best = null;
         double bestDist = Double.MAX_VALUE;

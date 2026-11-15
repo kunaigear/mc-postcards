@@ -10,18 +10,26 @@ import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
+import java.util.Collection;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 /**
- * Decides when the daily run is due. The last executed slot is persisted in {@code state.json},
- * so restarts neither skip nor repeat a run.
+ * Decides when the daily run is due. The last started slot and the cameras of that run that haven't finished yet
+ * are persisted in {@code state.json}, so restarts neither skip nor repeat a run, and a run interrupted by a
+ * restart or crash can be finished afterwards.
  */
 public final class DailyScheduler {
     private static final class State {
         String lastSlot;
+        List<String> pending;
     }
 
     private final Path stateFile;
     private @Nullable ZonedDateTime lastSlot;
+    /** Names of cameras from the last run that haven't finished (rendered and delivered, or failed) yet. */
+    private final Set<String> pending = new LinkedHashSet<>();
 
     public DailyScheduler(Path stateFile) {
         this.stateFile = stateFile;
@@ -29,10 +37,12 @@ public final class DailyScheduler {
 
     public void load(DailyCamsConfig cfg) {
         lastSlot = null;
+        pending.clear();
         try {
             if (Files.exists(stateFile)) {
                 State s = Json.GSON.fromJson(Files.readString(stateFile), State.class);
                 if (s != null && s.lastSlot != null) lastSlot = ZonedDateTime.parse(s.lastSlot);
+                if (s != null && s.pending != null) pending.addAll(s.pending);
             }
         } catch (Exception e) {
             DailyCams.LOGGER.warn("Could not read {}: {}", stateFile, e.getMessage());
@@ -83,10 +93,40 @@ public final class DailyScheduler {
         return null;
     }
 
+    /** Records which cameras the run that just started includes. */
+    public void startRun(Collection<String> cameraNames) {
+        pending.clear();
+        pending.addAll(cameraNames);
+        save();
+    }
+
+    /** A camera of the current run has finished, successfully or not. */
+    public void finished(String cameraName) {
+        if (pending.remove(cameraName)) save();
+    }
+
+    /** Cameras of the last run that hadn't finished when the server stopped. */
+    public List<String> unfinished() {
+        return List.copyOf(pending);
+    }
+
+    public void clearUnfinished() {
+        if (!pending.isEmpty()) {
+            pending.clear();
+            save();
+        }
+    }
+
     private void markDone(ZonedDateTime slot) {
         lastSlot = slot;
+        pending.clear(); // a new run replaces whatever was left of the previous one
+        save();
+    }
+
+    private void save() {
         State s = new State();
-        s.lastSlot = slot.toString();
+        s.lastSlot = lastSlot != null ? lastSlot.toString() : null;
+        s.pending = pending.isEmpty() ? null : List.copyOf(pending);
         try {
             Json.writeAtomically(stateFile, Json.GSON.toJson(s));
         } catch (Exception e) {

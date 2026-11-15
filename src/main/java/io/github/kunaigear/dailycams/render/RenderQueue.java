@@ -11,6 +11,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.server.level.TicketType;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ChunkPos;
 import org.jetbrains.annotations.Nullable;
 
@@ -27,6 +28,7 @@ import javax.imageio.stream.MemoryCacheImageOutputStream;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -193,10 +195,15 @@ public final class RenderQueue {
                         for (ChunkPos p : toLoad) {
                             if (source.getChunkNow(p.x(), p.z()) == null) missing.add(p.pack());
                         }
+                        // Entities can only be queried safely here, on the server thread.
+                        Entity hidden = CameraRenderer.entityAtCamera(level, c.x, c.y, c.z);
+                        DailyCamsConfig cfg = request.config;
                         long started = System.nanoTime();
+                        // Encoding happens on the render thread too, so a slow webhook only ever holds the small
+                        // encoded file in memory, never the raw image.
                         CompletableFuture
-                                .supplyAsync(() -> CameraRenderer.render(level, c.x, c.y, c.z, c.yaw, c.pitch, settings, missing), renderExecutor)
-                                .whenComplete((image, error) -> server.execute(() -> onRendered(image, error, started)));
+                                .supplyAsync(() -> encode(c, cfg, CameraRenderer.render(level, c.x, c.y, c.z, c.yaw, c.pitch, settings, missing, hidden)), renderExecutor)
+                                .whenComplete((encoded, error) -> server.execute(() -> onRendered(encoded, error, started)));
                     }
                 }
                 case RENDERING -> { /* waiting for the render thread */ }
@@ -210,38 +217,47 @@ public final class RenderQueue {
             pending.clear();
         }
 
-        void onRendered(@Nullable BufferedImage image, @Nullable Throwable error, long startedNanos) {
+        void onRendered(@Nullable Encoded encoded, @Nullable Throwable error, long startedNanos) {
             releaseTicket();
             if (active == this) active = null;
             CameraSpec cam = request.camera;
-            if (error != null || image == null) {
+            if (error != null || encoded == null) {
                 Throwable cause = error != null && error.getCause() != null ? error.getCause() : error;
                 DailyCams.LOGGER.error("Rendering camera '{}' failed", cam.name, cause);
                 request.callback.accept(new Result(cam, false, "Render failed: " + (cause == null ? "no image" : cause), null));
                 return;
             }
             long ms = (System.nanoTime() - startedNanos) / 1_000_000;
-            DailyCams.LOGGER.info("Rendered camera '{}' ({}x{}) in {} ms", cam.name, image.getWidth(), image.getHeight(), ms);
+            DailyCams.LOGGER.info("Rendered camera '{}' ({}x{}) in {} ms", cam.name, encoded.width(), encoded.height(), ms);
             MinecraftServer server = level.getServer();
             CompletableFuture
-                    .supplyAsync(() -> deliver(cam, request.config, image), deliveryExecutor)
+                    .supplyAsync(() -> deliver(cam, request.config, encoded), deliveryExecutor)
                     .exceptionally(t -> new Result(cam, false, "Delivery failed: " + t, null))
                     .thenAccept(result -> server.execute(() -> request.callback.accept(result)));
         }
     }
 
-    private Result deliver(CameraSpec cam, DailyCamsConfig cfg, BufferedImage raw) {
+    /** A rendered picture, already encoded. */
+    record Encoded(WebhookSender.Image image, Instant takenAt, int width, int height) {}
+
+    /** Runs on the render thread. */
+    private static Encoded encode(CameraSpec cam, DailyCamsConfig cfg, BufferedImage raw) {
         Instant takenAt = Instant.now();
         String stamp = FILE_TIME.format(takenAt.atZone(cfg.zone()));
-        WebhookSender.Image image;
         try {
             long encodeStart = System.nanoTime();
-            image = encode(toRgb(raw), cfg, cam.name + "_" + stamp);
+            WebhookSender.Image image = encode(toRgb(raw), cfg, cam.name + "_" + stamp);
             DailyCams.LOGGER.info("Encoded camera '{}' as {} ({} KiB) in {} ms", cam.name, image.mimeType(),
                     image.bytes().length / 1024, (System.nanoTime() - encodeStart) / 1_000_000);
+            return new Encoded(image, takenAt, raw.getWidth(), raw.getHeight());
         } catch (IOException e) {
-            return new Result(cam, false, "Could not encode image: " + e.getMessage(), null);
+            throw new UncheckedIOException("Could not encode image", e);
         }
+    }
+
+    private Result deliver(CameraSpec cam, DailyCamsConfig cfg, Encoded encoded) {
+        Instant takenAt = encoded.takenAt();
+        WebhookSender.Image image = encoded.image();
 
         Path local = null;
         if (cfg.keepLocalCopies) {
@@ -268,10 +284,16 @@ public final class RenderQueue {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return new Result(cam, false, "Upload interrupted", local);
+        } catch (WebhookSender.HttpStatusException e) {
+            // The response body goes to the log only: a receiver could echo the request URL and its token.
+            DailyCams.LOGGER.error("Sending camera '{}' to webhook failed: HTTP {}: {}", cam.name, e.status,
+                    e.responseBody.replace(url, WebhookSender.redact(url)));
+            return new Result(cam, false, "Webhook failed: HTTP " + e.status, local);
         } catch (Exception e) {
-            String why = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-            DailyCams.LOGGER.error("Sending camera '{}' to webhook failed: {}", cam.name, why);
-            return new Result(cam, false, "Webhook failed: " + why, local);
+            // Exception messages can contain the URL (an invalid URL, for example), so players only see the type.
+            String detail = e.getMessage() != null ? e.getMessage().replace(url, WebhookSender.redact(url)) : "";
+            DailyCams.LOGGER.error("Sending camera '{}' to webhook failed: {} {}", cam.name, e.getClass().getSimpleName(), detail);
+            return new Result(cam, false, "Webhook failed: " + e.getClass().getSimpleName(), local);
         }
     }
 

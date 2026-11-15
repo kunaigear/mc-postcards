@@ -31,6 +31,35 @@ public final class WebhookSender {
 
     public record Image(byte[] bytes, String fileName, String mimeType) {}
 
+    /**
+     * The webhook answered with an error status. The message only has the status, so it's safe to show players;
+     * {@link #responseBody} is for the server log.
+     */
+    public static final class HttpStatusException extends IOException {
+        public final int status;
+        public final String responseBody;
+
+        HttpStatusException(int status, String responseBody) {
+            super("HTTP " + status);
+            this.status = status;
+            this.responseBody = responseBody;
+        }
+    }
+
+    /**
+     * A webhook URL for display: only the scheme and host, because a credential can be anywhere in the path or
+     * query (for Discord, the path holds the token).
+     */
+    public static String redact(String url) {
+        try {
+            URI uri = new URI(url);
+            if (uri.getScheme() != null && uri.getHost() != null) return uri.getScheme() + "://" + uri.getHost() + "/…";
+        } catch (Exception ignored) {
+            // fall through
+        }
+        return "(hidden)";
+    }
+
     public static boolean isValidUrl(String url) {
         try {
             URI uri = new URI(url);
@@ -68,7 +97,7 @@ public final class WebhookSender {
 
             boolean retryable = status == 429 || status >= 500;
             if (!retryable || attempt >= MAX_ATTEMPTS) {
-                throw new IOException("Webhook answered HTTP " + status + ": " + abbreviate(response.body()));
+                throw new HttpStatusException(status, abbreviate(response.body()));
             }
             long waitMs = status == 429 ? retryAfterMs(response) : 2000L * attempt;
             DailyCams.LOGGER.warn("Webhook for camera '{}' answered HTTP {}, retrying in {} ms", cam.name, status, waitMs);

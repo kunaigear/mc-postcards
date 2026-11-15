@@ -24,6 +24,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -78,9 +80,9 @@ public final class DailyCams implements ModInitializer {
         ticketType = Registry.register(BuiltInRegistries.TICKET_TYPE, Identifier.fromNamespaceAndPath(MOD_ID, "render"),
                 new TicketType(TicketType.NO_TIMEOUT, TicketType.FLAG_LOADING));
 
-        config = DailyCamsConfig.load(dir.resolve("config.json"));
+        config = DailyCamsConfig.load(dir.resolve("config.json"), null, new ArrayList<>());
         cameras = new CameraStore(dir.resolve("cameras.json"));
-        cameras.load();
+        cameras.load(new ArrayList<>());
         scheduler = new DailyScheduler(dir.resolve("state.json"));
 
         CommandRegistrationCallback.EVENT.register((dispatcher, registries, env) -> CameraCommands.register(dispatcher));
@@ -92,6 +94,7 @@ public final class DailyCams implements ModInitializer {
                 LOGGER.warn("No webhookUrl set in {}; renders will only be saved locally", dir.resolve("config.json"));
             }
             LOGGER.info("{} camera(s) loaded, next daily run: {}", cameras.all().size(), scheduler.nextSlot(config));
+            resumeUnfinishedRun(server);
 
             // The schedule is checked from a wall-clock timer instead of the tick loop, because an empty
             // dedicated server pauses ticking. Tasks handed to server.execute() still run while paused.
@@ -126,11 +129,36 @@ public final class DailyCams implements ModInitializer {
 
     private void checkSchedule(MinecraftServer server) {
         if (queue == null || !scheduler.poll(config)) return;
-        int n = runAll(server, result -> {
+        List<String> started = runCameras(cameras.all(), dailyCallback(server));
+        scheduler.startRun(started);
+        LOGGER.info("Daily run started for {} camera(s)", started.size());
+    }
+
+    /** A daily run that a stop or crash interrupted is finished after the restart (if missed runs are caught up). */
+    private void resumeUnfinishedRun(MinecraftServer server) {
+        List<String> unfinished = scheduler.unfinished();
+        if (unfinished.isEmpty()) return;
+        if (!config.catchUpMissedRuns) {
+            LOGGER.info("Not finishing the interrupted daily run ({} camera(s) left): catchUpMissedRuns is off", unfinished.size());
+            scheduler.clearUnfinished();
+            return;
+        }
+        List<CameraSpec> left = new ArrayList<>();
+        for (String name : unfinished) {
+            CameraSpec cam = cameras.get(name);
+            if (cam != null) left.add(cam);
+        }
+        List<String> started = runCameras(left, dailyCallback(server));
+        scheduler.startRun(started);
+        LOGGER.info("Finishing the interrupted daily run: {} camera(s) left", started.size());
+    }
+
+    private Consumer<RenderQueue.Result> dailyCallback(MinecraftServer server) {
+        return result -> {
             logResult(result);
             notifyOwner(server, result);
-        });
-        LOGGER.info("Daily run started for {} camera(s)", n);
+            scheduler.finished(result.camera().name);
+        };
     }
 
     private void notifyOwner(MinecraftServer server, RenderQueue.Result result) {
@@ -150,12 +178,17 @@ public final class DailyCams implements ModInitializer {
 
     /** Queues every camera. Returns how many were queued. */
     public int runAll(MinecraftServer server, Consumer<RenderQueue.Result> callback) {
-        if (queue == null) return 0;
-        int n = 0;
-        for (CameraSpec cam : List.copyOf(cameras.all())) {
-            if (queue.submit(cam, config, callback)) n++;
+        return runCameras(cameras.all(), callback).size();
+    }
+
+    /** Queues the given cameras (skipping ones already queued) and returns the names of those queued. */
+    private List<String> runCameras(Collection<CameraSpec> cams, Consumer<RenderQueue.Result> callback) {
+        List<String> queued = new ArrayList<>();
+        if (queue == null) return queued;
+        for (CameraSpec cam : List.copyOf(cams)) {
+            if (queue.submit(cam, config, callback)) queued.add(cam.name);
         }
-        return n;
+        return queued;
     }
 
     public static void logResult(RenderQueue.Result result) {
@@ -166,10 +199,16 @@ public final class DailyCams implements ModInitializer {
         }
     }
 
-    public void reload() {
-        config = DailyCamsConfig.load(dir.resolve("config.json"));
-        cameras.load();
+    /**
+     * Reloads the config and cameras. A file that can't be read keeps the settings that were loaded before.
+     * Returns the problems, for the command to show.
+     */
+    public List<String> reload() {
+        List<String> problems = new ArrayList<>();
+        config = DailyCamsConfig.load(dir.resolve("config.json"), config, problems);
+        cameras.load(problems);
         scheduler.load(config);
+        return problems;
     }
 
     public DailyCamsConfig config() {

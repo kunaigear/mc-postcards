@@ -3,6 +3,7 @@ package io.github.kunaigear.dailycams.config;
 import io.github.kunaigear.dailycams.DailyCams;
 import io.github.kunaigear.dailycams.util.Json;
 import net.minecraft.util.Mth;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -90,13 +91,27 @@ public final class DailyCamsConfig {
     private transient List<LocalTime> parsedTimes = List.of();
     private transient ZoneId zone = ZoneId.systemDefault();
 
-    public static DailyCamsConfig load(Path file) {
+    /**
+     * Loads the config. If the file exists but can't be read (say, a typo in the JSON), it's backed up and left
+     * alone, never overwritten, and {@code previous} is kept (or the defaults on first load). The problem is
+     * added to {@code problems}.
+     */
+    public static DailyCamsConfig load(Path file, @Nullable DailyCamsConfig previous, List<String> problems) {
         DailyCamsConfig cfg = null;
         if (Files.exists(file)) {
             try {
                 cfg = Json.GSON.fromJson(Files.readString(file), DailyCamsConfig.class);
             } catch (Exception e) {
-                DailyCams.LOGGER.error("Could not read {}, using defaults: {}", file, e.getMessage());
+                Path copy = Json.backupBroken(file);
+                String problem = file.getFileName() + " has an error and wasn't loaded (" + e.getMessage() + "). "
+                        + (previous != null ? "Kept the previous settings." : "Using the defaults until it's fixed.")
+                        + (copy != null ? " A copy is in " + copy.getFileName() + "." : "");
+                DailyCams.LOGGER.error(problem);
+                problems.add(problem);
+                if (previous != null) return previous;
+                DailyCamsConfig defaults = new DailyCamsConfig();
+                defaults.validate();
+                return defaults; // don't write: the broken file is what the admin wants to fix
             }
         }
         if (cfg == null) cfg = new DailyCamsConfig();

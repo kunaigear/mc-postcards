@@ -67,8 +67,13 @@ you've already set are kept, which also means an existing file keeps its old def
 |---|---|
 | `config/dailycams/config.json` | The options above. |
 | `config/dailycams/cameras.json` | All cameras. Edit only while the server is stopped, or run `/dailycam reload` afterwards. |
-| `config/dailycams/state.json` | When the schedule last ran, so restarts neither skip nor repeat a run. |
+| `config/dailycams/state.json` | When the schedule last ran, so restarts neither skip nor repeat a run, and which cameras of that run aren't finished yet. If the server stops during a run, the rest is rendered after the restart (when `catchUpMissedRuns` is on). |
 | `config/dailycams/renders/` | Local copies of the pictures, one folder per camera. |
+
+If `config.json` or `cameras.json` has an error, for example a missing comma after editing it by hand, it isn't
+loaded. A copy is saved as `<file>.broken-<date>`, and the error is logged and shown by `/dailycam reload`. The
+mod keeps the settings and cameras it had loaded before (or uses the defaults at startup) and never overwrites a
+broken `config.json`.
 
 Daily Cams also uses Camera Obscura's own config (`config/cameraobscura/config.json`) for things like whether
 mobs and players appear in pictures (`renderEntities`).

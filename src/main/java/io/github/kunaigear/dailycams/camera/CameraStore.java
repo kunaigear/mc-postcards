@@ -30,19 +30,34 @@ public final class CameraStore {
         this.file = file;
     }
 
-    public void load() {
-        cameras.clear();
-        if (!Files.exists(file)) return;
+    /**
+     * Loads the cameras. If the file can't be read, it's backed up first (the next save would otherwise replace it
+     * with only the cameras still in memory) and the cameras loaded before are kept. Problems go to {@code problems}.
+     */
+    public void load(List<String> problems) {
+        if (!Files.exists(file)) {
+            cameras.clear();
+            return;
+        }
+        Map<String, CameraSpec> loaded = new LinkedHashMap<>();
         try {
             List<CameraSpec> list = Json.GSON.fromJson(Files.readString(file), new TypeToken<List<CameraSpec>>() {}.getType());
             if (list != null) {
                 for (CameraSpec c : list) {
-                    if (c != null && c.name != null && c.dimension != null) cameras.put(key(c.name), c);
+                    if (c != null && c.name != null && c.dimension != null) loaded.put(key(c.name), c);
                 }
             }
         } catch (Exception e) {
-            DailyCams.LOGGER.error("Could not read {}: {}", file, e.getMessage());
+            Path copy = Json.backupBroken(file);
+            String problem = file.getFileName() + " has an error and wasn't loaded (" + e.getMessage() + "). "
+                    + (cameras.isEmpty() ? "No cameras are loaded" : "Kept the " + cameras.size() + " camera(s) loaded before")
+                    + (copy != null ? "; a copy of the file is in " + copy.getFileName() + "." : ".");
+            DailyCams.LOGGER.error(problem);
+            problems.add(problem);
+            return;
         }
+        cameras.clear();
+        cameras.putAll(loaded);
     }
 
     public void save() {

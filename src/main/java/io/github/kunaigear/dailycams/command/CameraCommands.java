@@ -365,7 +365,7 @@ public final class CameraCommands {
                 .append(Component.literal("\n  FOV: " + (cam.fov != null ? cam.fov : cfg.fov + " (default)")))
                 .append(Component.literal("\n  Shader: " + (cam.shader != null ? cam.shader : cfg.shader + " (default)")));
         if (isAdmin(src)) {
-            out.append(Component.literal("\n  Webhook: " + (cam.webhookUrl != null ? redact(cam.webhookUrl) : "default")));
+            out.append(Component.literal("\n  Webhook: " + (cam.webhookUrl != null ? WebhookSender.redact(cam.webhookUrl) : "default")));
         }
         src.sendSuccess(() -> out, false);
         return 1;
@@ -404,7 +404,7 @@ public final class CameraCommands {
         cam.webhookUrl = url == null ? null : url.trim();
         DailyCams.get().cameras().put(cam);
         src.sendSuccess(() -> Component.literal("Webhook of '" + cam.name + "' is now "
-                + (url == null ? "the default." : redact(cam.webhookUrl) + ".")), false);
+                + (url == null ? "the default." : WebhookSender.redact(cam.webhookUrl) + ".")), false);
         return 1;
     }
 
@@ -469,9 +469,13 @@ public final class CameraCommands {
     }
 
     private static int reload(CommandContext<CommandSourceStack> ctx) {
-        DailyCams.get().reload();
-        ctx.getSource().sendSuccess(() -> Component.literal("Reloaded Daily Cams config and cameras."), true);
-        return 1;
+        List<String> problems = DailyCams.get().reload();
+        if (problems.isEmpty()) {
+            ctx.getSource().sendSuccess(() -> Component.literal("Reloaded Daily Cams config and cameras."), true);
+            return 1;
+        }
+        for (String problem : problems) ctx.getSource().sendFailure(Component.literal(problem));
+        return 0;
     }
 
     private static int help(CommandContext<CommandSourceStack> ctx) {
@@ -624,12 +628,5 @@ public final class CameraCommands {
 
     private static String formatDuration(long seconds) {
         return seconds >= 60 ? (seconds / 60) + "m " + (seconds % 60) + "s" : seconds + "s";
-    }
-
-    /** Webhook URLs contain a secret token; never echo it in full. */
-    private static String redact(String url) {
-        int slash = url.lastIndexOf('/');
-        if (slash < 0 || slash >= url.length() - 5) return url;
-        return url.substring(0, slash + 1) + url.substring(slash + 1, slash + 5) + "...";
     }
 }
