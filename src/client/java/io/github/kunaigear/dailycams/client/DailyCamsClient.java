@@ -1,14 +1,18 @@
 package io.github.kunaigear.dailycams.client;
 
+import com.mojang.brigadier.tree.CommandNode;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
+
+import org.jetbrains.annotations.Nullable;
 
 import java.util.Locale;
 import java.util.Set;
@@ -24,6 +28,9 @@ import java.util.Set;
  * Before the command is sent, it's rewritten into the explicit form
  * {@code /dailycam set <name> <x y z> <yaw pitch> <fov>}. That's a normal command, checked with the normal
  * permissions, so the server needs nothing extra.
+ * <p>
+ * Older servers don't accept everything (the FOV argument is new in 1.2.1), so the helper first looks at the
+ * command list the server sent to this client and only adds what that server understands.
  */
 public final class DailyCamsClient implements ClientModInitializer {
     /** The server's command and its alias, and the subcommand that places a camera. */
@@ -51,11 +58,15 @@ public final class DailyCamsClient implements ClientModInitializer {
         if (player == null) {
             return command;
         }
+        ServerSupport server = ServerSupport.of(mc, args[0]);
+        if (!server.position()) {
+            return command; // not a Daily Cams server we know how to talk to
+        }
         int fov = mc.options.fov().get();
 
         // A position is given, only the fov is missing.
         if (args.length == WITH_POSITION) {
-            return String.join(" ", args) + " " + fov;
+            return server.fov() ? String.join(" ", args) + " " + fov : command;
         }
         if (args.length > MAX_WITHOUT_POSITION) {
             return command; // Already has a fov, or isn't a valid command; the server will say so.
@@ -63,9 +74,13 @@ public final class DailyCamsClient implements ClientModInitializer {
 
         String name = args.length == 3 ? args[2] : player.getGameProfile().name();
         Camera camera = mc.gameRenderer.mainCamera();
+        boolean freecam = isFreecam(mc, player, camera);
+        if (!freecam && !server.fov()) {
+            return command; // nothing to add: the server knows where the player's eyes are
+        }
         Vec3 pos;
         float yaw, pitch;
-        if (isFreecam(mc, player, camera)) {
+        if (freecam) {
             pos = camera.position();
             yaw = camera.yRot();
             pitch = camera.xRot();
@@ -75,8 +90,27 @@ public final class DailyCamsClient implements ClientModInitializer {
             yaw = player.getYRot();
             pitch = player.getXRot();
         }
-        return String.format(Locale.ROOT, "%s %s %s %.3f %.3f %.3f %.2f %.2f %d", args[0], SET, name,
-                pos.x, pos.y, pos.z, Mth.wrapDegrees(yaw), pitch, fov);
+        String rewritten = String.format(Locale.ROOT, "%s %s %s %.3f %.3f %.3f %.2f %.2f", args[0], SET, name,
+                pos.x, pos.y, pos.z, Mth.wrapDegrees(yaw), pitch);
+        return server.fov() ? rewritten + " " + fov : rewritten;
+    }
+
+    /** What the server's {@code /dailycam set} accepts, read from the command list the server sent. */
+    record ServerSupport(boolean position, boolean fov) {
+        private static final ServerSupport NONE = new ServerSupport(false, false);
+
+        static ServerSupport of(Minecraft mc, String root) {
+            ClientPacketListener connection = mc.getConnection();
+            if (connection == null) return NONE;
+            CommandNode<?> node = connection.getCommands().getRoot().getChild(root);
+            if (node != null && node.getRedirect() != null) node = node.getRedirect(); // the /dcam alias
+            CommandNode<?> rotation = child(child(child(child(node, SET), "name"), "pos"), "rotation");
+            return new ServerSupport(rotation != null, child(rotation, "fov") != null);
+        }
+
+        private static @Nullable CommandNode<?> child(@Nullable CommandNode<?> node, String name) {
+            return node == null ? null : node.getChild(name);
+        }
     }
 
     /**

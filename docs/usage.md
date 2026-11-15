@@ -59,8 +59,9 @@ The server only knows where your body is and nothing about your game settings. T
 in the rest when you place a camera.
 
 Install `daily-cams-client-<version>.jar` from the
-[releases](https://github.com/kunaigear/mc-postcards/releases) on your client (it needs Fabric API). Use the
-same version as the server. Then `/dailycam set` and `/dailycam set <name>` work as before, with two differences:
+[releases](https://github.com/kunaigear/mc-postcards/releases) on your client (it needs Fabric API). It
+checks which options the server's Daily Cams version supports, so it also works on older servers (the FOV needs
+a 1.2.1 or newer server). Then `/dailycam set` and `/dailycam set <name>` work as before, with two differences:
 
 - **Your field of view:** the camera uses your FOV setting from *Options*, so the picture shows as much as you
   saw on screen. This also applies when you give a position, unless you add a FOV at the end yourself.
