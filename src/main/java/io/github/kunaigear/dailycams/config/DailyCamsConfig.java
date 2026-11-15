@@ -35,8 +35,8 @@ public final class DailyCamsConfig {
     public int width = 1280;
     public int height = 720;
     public int fov = 70;
-    /** View distance in blocks. Higher = slower render and more chunks loaded. */
-    public int renderDistance = 96;
+    /** View distance in chunks, like Minecraft's own setting. Higher = slower render and more chunks loaded. */
+    public int renderDistance = 16;
     /** Supersampling factor (1 = off). */
     public int ssaa = 2;
 
@@ -59,7 +59,7 @@ public final class DailyCamsConfig {
     /** Tell owners in chat when the daily picture from their camera has been posted. */
     public boolean notifyOwners = true;
     public int testCooldownSeconds = 300;
-    public int chunkLoadTimeoutSeconds = 60;
+    public int chunkLoadTimeoutSeconds = 120;
 
     // ---- derived, not serialized ----
     private transient List<LocalTime> parsedTimes = List.of();
@@ -88,7 +88,7 @@ public final class DailyCamsConfig {
         width = Mth.clamp(width, 16, 3840);
         height = Mth.clamp(height, 16, 2160);
         fov = Mth.clamp(fov, 30, 110);
-        renderDistance = Mth.clamp(renderDistance, 16, 256);
+        renderDistance = Mth.clamp(renderDistance, 2, 32);
         ssaa = Mth.clamp(ssaa, 1, 4);
         jpegQuality = Mth.clamp(jpegQuality, 0.1f, 1f);
         namedCameraLimit = Math.max(0, namedCameraLimit);
@@ -127,6 +127,10 @@ public final class DailyCamsConfig {
                 DailyCams.LOGGER.warn("Unknown timeZone '{}', using system zone {}", timeZone, zone);
             }
         }
+    }
+
+    public int renderDistanceBlocks() {
+        return renderDistance * 16;
     }
 
     public List<LocalTime> times() {

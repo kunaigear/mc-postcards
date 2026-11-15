@@ -75,7 +75,7 @@ message if they're online (`notifyOwners`).
 | `catchUpMissedRuns` | `true` | If the server was offline at the scheduled time, render as soon as it starts. |
 | `width`, `height` | `1280`, `720` | Picture size. |
 | `fov` | `70` | Default field of view. |
-| `renderDistance` | `96` | View distance in blocks (16–256). Higher values are slower and load more chunks. |
+| `renderDistance` | `16` | View distance in chunks (2–32), like Minecraft's own setting. Higher values are slower and load more chunks. |
 | `ssaa` | `2` | Supersampling (1 = off). |
 | `imageFormat` | `"png"` | `png` or `jpg`. A PNG larger than `maxUploadBytes` is sent as a JPEG instead. |
 | `maxUploadBytes` | ~10 MB | Discord's default upload limit for webhooks. |
@@ -84,7 +84,7 @@ message if they're online (`notifyOwners`).
 | `namedCameraLimit` | `3` | Named cameras allowed for the elevated tier (on top of the personal one). |
 | `notifyOwners` | `true` | Tells online owners in chat when their camera's daily picture has been posted. |
 | `testCooldownSeconds` | `300` | Cooldown on `/mc_camera test` for non-admins. |
-| `chunkLoadTimeoutSeconds` | `60` | If the area isn't loaded by then, the camera renders anyway. |
+| `chunkLoadTimeoutSeconds` | `120` | If the area isn't loaded by then, the camera renders anyway. |
 
 Cameras are stored in `config/dailycams/cameras.json`. The last scheduled run is stored in `state.json`, so
 restarts neither skip a run nor repeat one.
@@ -104,7 +104,11 @@ The dedicated server's `pause-when-empty-seconds` would stop the game from ticki
 schedule therefore runs on a wall-clock timer, and while renders are queued the mod keeps the server from
 pausing. Afterwards it may pause again.
 
-At 960×540 a render takes roughly 10–15 seconds of background CPU time. The server thread is never blocked.
+With the defaults (1280×720, 16 chunks), one render took about 17 seconds of background CPU time in testing.
+Most of that time goes into building the geometry of the chunk sections the camera can see; drawing the frame
+takes 1–2 seconds. Sections outside the view, beyond the view distance or outside the build height are skipped.
+The server thread is never blocked. Before rendering, a square of chunks `renderDistance + 1` around the camera
+is loaded, which is 35×35 chunks at the default.
 
 ## Caveats
 

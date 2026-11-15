@@ -128,9 +128,9 @@ public final class RenderQueue {
             DailyCamsConfig cfg = request.config;
             CameraSpec cam = request.camera;
             this.settings = new CameraRenderer.Settings(cfg.width, cfg.height,
-                    cam.fov != null ? cam.fov : cfg.fov, cfg.renderDistance, cfg.ssaa);
+                    cam.fov != null ? cam.fov : cfg.fov, cfg.renderDistanceBlocks(), cfg.ssaa);
             this.center = new ChunkPos((int) Math.floor(cam.x) >> 4, (int) Math.floor(cam.z) >> 4);
-            this.chunkRadius = CameraRenderer.chunkRadius(cfg.renderDistance);
+            this.chunkRadius = CameraRenderer.chunkRadius(cfg.renderDistanceBlocks());
             // One extra ring so edge chunks have neighbours for lighting and ambient occlusion.
             this.ticketRadius = chunkRadius + 1;
             this.startTick = tick;
