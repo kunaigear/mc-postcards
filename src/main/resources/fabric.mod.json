@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "dailycams",
+  "version": "${version}",
+  "name": "Daily Cams",
+  "description": "Players place virtual cameras with /mc_setcamera. Every day the server renders what each camera sees (using Camera Obscura) and posts the picture to a webhook.",
+  "authors": ["kunaigear"],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["io.github.kunaigear.dailycams.DailyCams"]
+  },
+  "mixins": ["dailycams.mixins.json"],
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "fabric-api": "*",
+    "minecraft": "~${minecraft_version}",
+    "camera-obscura": ">=${camera_obscura_version}",
+    "java": ">=25"
+  }
+}

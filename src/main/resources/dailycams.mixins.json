@@ -1,0 +1,16 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "io.github.kunaigear.dailycams.mixin",
+  "mixins": [
+    "ChunkMeshCacheMixin",
+    "ChunkMeshCacheInvoker",
+    "ChunkMeshInvoker"
+  ],
+  "server": [
+    "DedicatedServerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
