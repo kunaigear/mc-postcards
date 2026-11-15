@@ -50,7 +50,14 @@ public final class DailyCamsConfig {
     /** Delete local copies older than this. 0 = keep forever. */
     public int localCopyRetentionDays = 30;
 
-    public int maxCamerasPerPlayer = 3;
+    /**
+     * Every player gets one personal camera named after them. Players with dailycams:camera.named
+     * (default: op level 2) may create this many named cameras on top of it; players with
+     * dailycams:camera.unlimited (default: op level 4) have no limit.
+     */
+    public int namedCameraLimit = 3;
+    /** Tell owners in chat when the daily picture from their camera has been posted. */
+    public boolean notifyOwners = true;
     public int testCooldownSeconds = 300;
     public int chunkLoadTimeoutSeconds = 60;
 
@@ -84,7 +91,7 @@ public final class DailyCamsConfig {
         renderDistance = Mth.clamp(renderDistance, 16, 256);
         ssaa = Mth.clamp(ssaa, 1, 4);
         jpegQuality = Mth.clamp(jpegQuality, 0.1f, 1f);
-        maxCamerasPerPlayer = Math.max(0, maxCamerasPerPlayer);
+        namedCameraLimit = Math.max(0, namedCameraLimit);
         testCooldownSeconds = Math.max(0, testCooldownSeconds);
         chunkLoadTimeoutSeconds = Mth.clamp(chunkLoadTimeoutSeconds, 5, 600);
         localCopyRetentionDays = Math.max(0, localCopyRetentionDays);

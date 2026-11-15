@@ -22,34 +22,45 @@ Java 25 is required, as for every 26.x server.
 
 Start the server once. Then set `webhookUrl` in `config/dailycams/config.json` and run `/mc_camera reload`.
 
+## Cameras and permissions
+
+Every player gets **one personal camera**, named after them. Players with a higher permission tier can
+also create **named cameras**:
+
+| Tier | Permission node | Default | Cameras |
+|---|---|---|---|
+| Everyone | `dailycams:command.setcamera` | all players | 1 personal camera |
+| Elevated | `dailycams:camera.named` | op level 2 | personal camera + up to `namedCameraLimit` (3) named cameras |
+| Highest | `dailycams:camera.unlimited` | op level 4 | personal camera + any number of named cameras |
+| Admin | `dailycams:admin` | op level 3 | manage everyone's cameras, per-camera webhooks, `runall`, `reload` |
+
+`dailycams:command.test` (everyone) allows previews of your own cameras. The mod uses Fabric API's permission
+API, so LuckPerms and similar mods can grant these nodes instead of op levels.
+
+A player's personal camera follows them if they change their username: running `/mc_setcamera` again renames
+it. A named camera can't use a player's name. That name stays reserved for that player's personal camera.
+Online players, existing personal cameras and the server's `usercache.json` are checked.
+
 ## Commands
 
 | Command | Who | What it does |
 |---|---|---|
-| `/mc_setcamera <name>` | everyone | Places a camera at your eyes, looking where you look. Running it again with the same name moves the camera. |
-| `/mc_setcamera <name> <x y z> <yaw pitch>` | everyone | Sets the position and direction explicitly. `~` works. The dimension is the one you're in, or use `/execute in`. |
-| `/mc_camera list` | everyone | Lists your cameras. Admins see all of them. |
-| `/mc_camera info <name>` | everyone | Shows a camera's details. |
-| `/mc_camera remove <name>` | owner / admin | Deletes a camera. |
-| `/mc_camera test <name>` | owner / admin | Renders and sends a camera right away. Has a cooldown for non-admins. |
-| `/mc_camera fov <name> <30-110\|default>` | owner / admin | Sets the field of view for one camera. |
-| `/mc_camera status` | everyone | Shows the next scheduled run and the render queue. |
+| `/mc_setcamera` | everyone | Places your personal camera at your eyes, looking where you look. Run it again to move the camera. |
+| `/mc_setcamera <your name> <x y z> <yaw pitch>` | everyone | Places your personal camera at an exact position. `~` works. The dimension is the one you're in, or use `/execute in`. |
+| `/mc_setcamera <name> [<x y z> <yaw pitch>]` | elevated | Creates or moves a named camera. |
+| `/mc_camera list` | everyone | Lists your cameras, with clickable `[test]` and `[remove]` buttons. Admins see all cameras. |
+| `/mc_camera status` | everyone | Shows the next scheduled run, the queue and how many cameras you have. |
+| `/mc_camera info [name]` | everyone | Shows a camera's details. |
+| `/mc_camera test [name]` | owner / admin | Renders and sends a camera right away. Non-admins have a cooldown. |
+| `/mc_camera remove [name]` | owner / admin | Deletes a camera. |
+| `/mc_camera fov <30-110\|default> [name]` | owner / admin | Sets a camera's field of view. |
 | `/mc_camera webhook <name> <url\|default>` | admin | Sends one camera to a different webhook. |
 | `/mc_camera runall` | admin | Renders and sends every camera now. |
 | `/mc_camera reload` | admin | Reloads the config and `cameras.json`. |
 
-Camera names can use letters, digits, `_` and `-`, up to 32 characters. Each player can have up to
-`maxCamerasPerPlayer` cameras. Admins have no limit.
-
-### Permissions
-
-The mod uses Fabric API's permission API, so LuckPerms and similar mods work. These are the defaults:
-
-| Node | Default |
-|---|---|
-| `dailycams:command.setcamera` | everyone (`/mc_setcamera` and the basic `/mc_camera` subcommands) |
-| `dailycams:command.test` | everyone |
-| `dailycams:admin` | op level 2 |
+If you leave out `[name]`, the command uses your personal camera. Camera names can use letters, digits, `_` and
+`-`, up to 32 characters. When the daily picture from a player's camera is posted, the owner gets a chat
+message if they're online (`notifyOwners`).
 
 ## Configuration (`config/dailycams/config.json`)
 
@@ -70,7 +81,8 @@ The mod uses Fabric API's permission API, so LuckPerms and similar mods work. Th
 | `maxUploadBytes` | ~10 MB | Discord's default upload limit for webhooks. |
 | `keepLocalCopies` | `true` | Saves each picture under `config/dailycams/renders/<camera>/`. |
 | `localCopyRetentionDays` | `30` | Local copies older than this are deleted. `0` keeps them forever. |
-| `maxCamerasPerPlayer` | `3` | |
+| `namedCameraLimit` | `3` | Named cameras allowed for the elevated tier (on top of the personal one). |
+| `notifyOwners` | `true` | Tells online owners in chat when their camera's daily picture has been posted. |
 | `testCooldownSeconds` | `300` | Cooldown on `/mc_camera test` for non-admins. |
 | `chunkLoadTimeoutSeconds` | `60` | If the area isn't loaded by then, the camera renders anyway. |
 
@@ -113,3 +125,7 @@ At 960×540 a render takes roughly 10–15 seconds of background CPU time. The s
 ```
 
 The jar is written to `build/libs/`. `./gradlew runServer` starts a development server in `run/`.
+
+`./gradlew runDevtestServer` starts the same server with a dev-only test mod (`src/devtest`). Running `dctest` in
+its console runs the commands as fake players with op levels 0, 2 and 4 and logs every reply. The test mod is
+never included in the release jar.

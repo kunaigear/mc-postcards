@@ -15,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -61,7 +62,27 @@ public final class CameraStore {
     }
 
     public List<CameraSpec> ownedBy(@Nullable UUID owner) {
-        return cameras.values().stream().filter(c -> java.util.Objects.equals(c.owner, owner)).toList();
+        return cameras.values().stream().filter(c -> Objects.equals(c.owner, owner)).toList();
+    }
+
+    public @Nullable CameraSpec personalOf(UUID owner) {
+        return cameras.values().stream().filter(c -> c.personal && owner.equals(c.owner)).findFirst().orElse(null);
+    }
+
+    public long namedCount(UUID owner) {
+        return cameras.values().stream().filter(c -> !c.personal && owner.equals(c.owner)).count();
+    }
+
+    /** True if some player's personal camera is called this. */
+    public boolean isPersonalName(String name) {
+        CameraSpec c = get(name);
+        return c != null && c.personal;
+    }
+
+    public void rename(CameraSpec camera, String newName) {
+        cameras.remove(key(camera.name));
+        camera.name = newName;
+        put(camera);
     }
 
     public void put(CameraSpec camera) {

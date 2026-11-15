@@ -8,6 +8,8 @@ import java.util.UUID;
 /** One virtual camera as stored in {@code cameras.json}. */
 public final class CameraSpec {
     public String name;
+    /** The one camera every player gets, named after them. Doesn't count towards the named-camera limit. */
+    public boolean personal;
     /** Null when created from the server console. */
     public @Nullable UUID owner;
     public String ownerName;
@@ -27,6 +29,7 @@ public final class CameraSpec {
     public CameraSpec copy() {
         CameraSpec c = new CameraSpec();
         c.name = name;
+        c.personal = personal;
         c.owner = owner;
         c.ownerName = ownerName;
         c.dimension = dimension;

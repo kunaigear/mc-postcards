@@ -59,3 +59,25 @@ tasks.processResources {
 tasks.jar {
     from("LICENSE")
 }
+
+// ---------------------------------------------------------------------------------------------
+// Dev-only test mod: `./gradlew runDevtestServer`, then run `dctest` in the console. It drives the
+// real commands as fake players with different permission levels. Never part of the release jar.
+val devtest: SourceSet by sourceSets.creating {
+    compileClasspath += sourceSets.main.get().compileClasspath + sourceSets.main.get().output
+    runtimeClasspath += sourceSets.main.get().runtimeClasspath + sourceSets.main.get().output
+}
+
+loom {
+    mods {
+        register("dailycams") { sourceSet(sourceSets.main.get()) }
+        register("dailycams-devtest") { sourceSet(devtest) }
+    }
+    runs {
+        register("devtestServer") {
+            server()
+            source(devtest)
+            runDir("run")
+        }
+    }
+}

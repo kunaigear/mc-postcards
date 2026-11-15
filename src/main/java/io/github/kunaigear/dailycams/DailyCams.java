@@ -11,10 +11,13 @@ import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.TicketType;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -90,8 +93,21 @@ public final class DailyCams implements ModInitializer {
 
     private void checkSchedule(MinecraftServer server) {
         if (queue == null || !scheduler.poll(config)) return;
-        int n = runAll(server, DailyCams::logResult);
+        int n = runAll(server, result -> {
+            logResult(result);
+            notifyOwner(server, result);
+        });
         LOGGER.info("Daily run started for {} camera(s)", n);
+    }
+
+    private void notifyOwner(MinecraftServer server, RenderQueue.Result result) {
+        CameraSpec cam = result.camera();
+        if (!config.notifyOwners || !result.success() || cam.owner == null) return;
+        ServerPlayer owner = server.getPlayerList().getPlayer(cam.owner);
+        if (owner == null) return;
+        owner.sendSystemMessage(Component.literal(cam.personal
+                ? "Today's picture from your camera was posted."
+                : "Today's picture from your camera '" + cam.name + "' was posted.").withStyle(ChatFormatting.GREEN));
     }
 
     /** True while renders are queued; keeps an empty server from pausing. */
