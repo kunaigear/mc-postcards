@@ -42,49 +42,52 @@ public final class DevTest implements ModInitializer {
         Actor alicia = new Actor("Alicia", alice.id, PermissionLevel.ALL); // Alice after a name change
 
         LOG.info("===== tier 0: Alice =====");
-        as(server, level, alice, "mc_setcamera");
-        as(server, level, alice, "mc_setcamera");
-        as(server, level, alice, "mc_setcamera tower");
-        as(server, level, alice, "mc_setcamera Alice 10 100 10 90 0");
-        as(server, level, alice, "mc_camera fov 90");
-        as(server, level, alice, "mc_camera info");
-        as(server, level, alice, "mc_camera list");
-        as(server, level, alice, "mc_camera webhook Alice http://example.com/x");
+        as(server, level, alice, "dailycam set");
+        as(server, level, alice, "dailycam set");
+        as(server, level, alice, "dailycam set tower");
+        as(server, level, alice, "dailycam set Alice 10 100 10 90 0");
+        as(server, level, alice, "dailycam fov 90");
+        as(server, level, alice, "dailycam info");
+        as(server, level, alice, "dailycam list");
+        as(server, level, alice, "dcam list");
+        as(server, level, alice, "dcam set Alice 10 100 10 90 0");
+        as(server, level, alice, "dcam");
+        as(server, level, alice, "dailycam webhook Alice http://example.com/x");
 
         LOG.info("===== tier 4: Carol =====");
-        as(server, level, carol, "mc_setcamera");
-        for (int i = 1; i <= 5; i++) as(server, level, carol, "mc_setcamera c" + i);
+        as(server, level, carol, "dailycam set");
+        for (int i = 1; i <= 5; i++) as(server, level, carol, "dailycam set c" + i);
 
         LOG.info("===== tier 2: Bob =====");
-        as(server, level, bob, "mc_setcamera");
-        as(server, level, bob, "mc_setcamera b1");
-        as(server, level, bob, "mc_setcamera b2");
-        as(server, level, bob, "mc_setcamera b3");
-        as(server, level, bob, "mc_setcamera b4");
-        as(server, level, bob, "mc_setcamera Alice");
-        as(server, level, bob, "mc_setcamera Carol");
-        as(server, level, bob, "mc_setcamera bad.name");
-        as(server, level, bob, "mc_camera remove c1");
-        as(server, level, bob, "mc_camera remove b3");
-        as(server, level, bob, "mc_setcamera b4");
-        as(server, level, bob, "mc_camera list");
-        as(server, level, bob, "mc_camera status");
+        as(server, level, bob, "dailycam set");
+        as(server, level, bob, "dailycam set b1");
+        as(server, level, bob, "dailycam set b2");
+        as(server, level, bob, "dailycam set b3");
+        as(server, level, bob, "dailycam set b4");
+        as(server, level, bob, "dailycam set Alice");
+        as(server, level, bob, "dailycam set Carol");
+        as(server, level, bob, "dailycam set bad.name");
+        as(server, level, bob, "dailycam remove c1");
+        as(server, level, bob, "dailycam remove b3");
+        as(server, level, bob, "dailycam set b4");
+        as(server, level, bob, "dailycam list");
+        as(server, level, bob, "dailycam status");
 
         LOG.info("===== tier 0 again =====");
-        as(server, level, alice, "mc_camera remove b1");
-        as(server, level, alice, "mc_camera test");
-        as(server, level, alice, "mc_camera test");
-        as(server, level, alicia, "mc_setcamera");
-        as(server, level, alicia, "mc_camera info");
+        as(server, level, alice, "dailycam remove b1");
+        as(server, level, alice, "dailycam test");
+        as(server, level, alice, "dailycam test");
+        as(server, level, alicia, "dailycam set");
+        as(server, level, alicia, "dailycam info");
 
         LOG.info("===== tier 4 admin =====");
-        as(server, level, carol, "mc_camera remove b1");
-        as(server, level, carol, "mc_camera list");
+        as(server, level, carol, "dailycam remove b1");
+        as(server, level, carol, "dailycam list");
 
         LOG.info("===== console =====");
-        exec(server, server.createCommandSourceStack().withSource(capture("console")), "console", "mc_setcamera");
-        exec(server, server.createCommandSourceStack().withSource(capture("console")), "console", "mc_setcamera srvcam 0 100 0 0 0");
-        exec(server, server.createCommandSourceStack().withSource(capture("console")), "console", "mc_camera info");
+        exec(server, server.createCommandSourceStack().withSource(capture("console")), "console", "dailycam set");
+        exec(server, server.createCommandSourceStack().withSource(capture("console")), "console", "dailycam set srvcam 0 100 0 0 0");
+        exec(server, server.createCommandSourceStack().withSource(capture("console")), "console", "dailycam info");
     }
 
     private static void as(MinecraftServer server, ServerLevel level, Actor actor, String command) {

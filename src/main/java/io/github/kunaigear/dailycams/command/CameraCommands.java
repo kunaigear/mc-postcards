@@ -15,6 +15,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.tree.LiteralCommandNode;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
@@ -61,18 +62,22 @@ import java.util.function.BiFunction;
  * Every player owns one personal camera named after them. Higher permission tiers may add named cameras.
  *
  * <pre>
- * /mc_setcamera                               your personal camera, at your eyes
- * /mc_setcamera &lt;name&gt; [&lt;x y z&gt; &lt;yaw pitch&gt;]   a named camera (or your personal one, by your name)
- * /mc_camera list | status
- * /mc_camera info|test|remove [name]          name defaults to your personal camera
- * /mc_camera fov &lt;30-110|default&gt; [name]
- * /mc_camera webhook &lt;name&gt; &lt;url|default&gt;     admin
- * /mc_camera runall | reload                  admin
+ * /dailycam set                               your personal camera, at your eyes
+ * /dailycam set &lt;name&gt; [&lt;x y z&gt; &lt;yaw pitch&gt;]   a named camera (or your personal one, by your name)
+ * /dailycam list | status
+ * /dailycam info|test|remove [name]          name defaults to your personal camera
+ * /dailycam fov &lt;30-110|default&gt; [name]
+ * /dailycam webhook &lt;name&gt; &lt;url|default&gt;     admin
+ * /dailycam runall | reload                  admin
  * </pre>
  */
 public final class CameraCommands {
     /** Personal camera, listing, info. Everyone. */
-    private static final Identifier PERM_USE = perm("command.setcamera");
+    /** The command and its short alias. */
+    public static final String COMMAND = "dailycam";
+    public static final String ALIAS = "dcam";
+
+    private static final Identifier PERM_USE = perm("command.use");
     /** Preview renders of your own cameras. Everyone. */
     private static final Identifier PERM_TEST = perm("command.test");
     /** Up to {@code namedCameraLimit} extra named cameras. */
@@ -98,18 +103,16 @@ public final class CameraCommands {
     // ================================================================== registration
 
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
-        dispatcher.register(Commands.literal("mc_setcamera")
-                .requires(PermissionPredicates.<CommandSourceStack>require(PERM_USE, PermissionLevel.ALL))
-                .executes(ctx -> setFromView(ctx, null))
-                .then(nameArg(CameraCommands::suggestSettable)
-                        .executes(ctx -> setFromView(ctx, name(ctx)))
-                        .then(Commands.argument("pos", Vec3Argument.vec3())
-                                .then(Commands.argument("rotation", RotationArgument.rotation())
-                                        .executes(CameraCommands::setExplicit)))));
-
-        dispatcher.register(Commands.literal("mc_camera")
+        LiteralCommandNode<CommandSourceStack> root = dispatcher.register(Commands.literal(COMMAND)
                 .requires(PermissionPredicates.<CommandSourceStack>require(PERM_USE, PermissionLevel.ALL))
                 .executes(CameraCommands::help)
+                .then(Commands.literal("set")
+                        .executes(ctx -> setFromView(ctx, null))
+                        .then(nameArg(CameraCommands::suggestSettable)
+                                .executes(ctx -> setFromView(ctx, name(ctx)))
+                                .then(Commands.argument("pos", Vec3Argument.vec3())
+                                        .then(Commands.argument("rotation", RotationArgument.rotation())
+                                                .executes(CameraCommands::setExplicit)))))
                 .then(Commands.literal("help").executes(CameraCommands::help))
                 .then(Commands.literal("list").executes(CameraCommands::list))
                 .then(Commands.literal("status").executes(CameraCommands::status))
@@ -143,6 +146,12 @@ public final class CameraCommands {
                 .then(Commands.literal("reload")
                         .requires(PermissionPredicates.<CommandSourceStack>require(PERM_ADMIN, LEVEL_ADMIN))
                         .executes(CameraCommands::reload)));
+
+        // Short alias. A redirect only forwards arguments, so the bare alias needs its own executes.
+        dispatcher.register(Commands.literal(ALIAS)
+                .requires(PermissionPredicates.<CommandSourceStack>require(PERM_USE, PermissionLevel.ALL))
+                .executes(CameraCommands::help)
+                .redirect(root));
     }
 
     private static RequiredArgumentBuilder<CommandSourceStack, String> nameArg(SuggestionProvider<CommandSourceStack> suggestions) {
@@ -174,7 +183,7 @@ public final class CameraCommands {
         CommandSourceStack src = ctx.getSource();
         Entity entity = src.getEntity();
         if (entity == null) {
-            src.sendFailure(Component.literal("From the console, give a name, position and rotation: /mc_setcamera <name> <x y z> <yaw pitch>"));
+            src.sendFailure(Component.literal("From the console, give a name, position and rotation: /dailycam set <name> <x y z> <yaw pitch>"));
             return 0;
         }
         return set(src, name, entity.getEyePosition(), entity.getYRot(), entity.getXRot());
@@ -216,7 +225,7 @@ public final class CameraCommands {
         int limit = namedLimit(src);
         if (player != null && limit == 0) {
             src.sendFailure(Component.literal("You can have one camera, and it's named after you. "
-                    + "Run /mc_setcamera without a name to place or move it."));
+                    + "Run /dailycam set without a name to place or move it."));
             return 0;
         }
         if (!CameraStore.VALID_NAME.matcher(name).matches()) {
@@ -231,7 +240,7 @@ public final class CameraCommands {
             long used = store.namedCount(player.getUUID());
             if (used >= limit) {
                 src.sendFailure(Component.literal("You already have " + used + " of " + limit
-                        + " named cameras. Remove one with /mc_camera remove <name> first."));
+                        + " named cameras. Remove one with /dailycam remove <name> first."));
                 return 0;
             }
         }
@@ -298,7 +307,7 @@ public final class CameraCommands {
         } else {
             msg.append(Component.literal("\n"));
         }
-        msg.append(button("Preview now", "/mc_camera test " + cam.name, "Render it and send it to the webhook now", true));
+        msg.append(button("Preview now", "/dailycam test " + cam.name, "Render it and send it to the webhook now", true));
         ServerPlayer player = src.getPlayer();
         if (!cam.personal && player != null && Objects.equals(cam.owner, player.getUUID())) {
             msg.append(Component.literal("  " + namedUsage(src, player)).withStyle(ChatFormatting.DARK_GRAY));
@@ -323,7 +332,7 @@ public final class CameraCommands {
         }
         if (cams.isEmpty()) {
             out.append(Component.literal("\n  None yet. Look at something nice and run ").withStyle(ChatFormatting.GRAY))
-               .append(button("/mc_setcamera", "/mc_setcamera", "Place your camera here", false));
+               .append(button("/dailycam set", "/dailycam set", "Place your camera here", false));
         }
         for (CameraSpec c : cams) {
             out.append(Component.literal("\n  " + c.name).withStyle(c.personal ? ChatFormatting.YELLOW : ChatFormatting.AQUA)
@@ -331,9 +340,9 @@ public final class CameraCommands {
                                     (c.personal ? "Personal camera of " : "Named camera by ") + c.ownerName + "\n" + c.describePosition())))))
                .append(Component.literal("  " + coords(c) + (admin && !c.personal ? "  by " + c.ownerName : "") + "  ").withStyle(ChatFormatting.GRAY));
             if (canManage(src, c)) {
-                out.append(button("test", "/mc_camera test " + c.name, "Render and send now", true))
+                out.append(button("test", "/dailycam test " + c.name, "Render and send now", true))
                    .append(Component.literal(" "))
-                   .append(button("remove", "/mc_camera remove " + c.name, "Puts the command in your chat box", false));
+                   .append(button("remove", "/dailycam remove " + c.name, "Puts the command in your chat box", false));
             }
         }
         src.sendSuccess(() -> out, false);
@@ -463,19 +472,20 @@ public final class CameraCommands {
         CommandSourceStack src = ctx.getSource();
         MutableComponent out = Component.literal("Daily Cams").withStyle(ChatFormatting.GOLD)
                 .append(Component.literal(" - a picture from your camera is posted every day.").withStyle(ChatFormatting.GRAY))
-                .append(Component.literal("\n  /mc_setcamera").withStyle(ChatFormatting.YELLOW))
+                .append(Component.literal("\n  /dailycam set").withStyle(ChatFormatting.YELLOW))
                 .append(Component.literal(" - put your camera at your eyes, looking where you look"));
         if (namedLimit(src) > 0) {
-            out.append(Component.literal("\n  /mc_setcamera <name> [<x y z> <yaw pitch>]").withStyle(ChatFormatting.YELLOW))
+            out.append(Component.literal("\n  /dailycam set <name> [<x y z> <yaw pitch>]").withStyle(ChatFormatting.YELLOW))
                .append(Component.literal(" - an extra named camera"));
         }
-        out.append(Component.literal("\n  /mc_camera list | status").withStyle(ChatFormatting.YELLOW))
-           .append(Component.literal("\n  /mc_camera test | info | remove [name]").withStyle(ChatFormatting.YELLOW))
-           .append(Component.literal("\n  /mc_camera fov <30-110|default> [name]").withStyle(ChatFormatting.YELLOW))
-           .append(Component.literal("\n  /mc_camera shader <simple|none|default> [name]").withStyle(ChatFormatting.YELLOW));
+        out.append(Component.literal("\n  /dailycam list | status").withStyle(ChatFormatting.YELLOW))
+           .append(Component.literal("\n  /dailycam test | info | remove [name]").withStyle(ChatFormatting.YELLOW))
+           .append(Component.literal("\n  /dailycam fov <30-110|default> [name]").withStyle(ChatFormatting.YELLOW))
+           .append(Component.literal("\n  /dailycam shader <simple|none|default> [name]").withStyle(ChatFormatting.YELLOW));
         if (isAdmin(src)) {
-            out.append(Component.literal("\n  /mc_camera webhook <name> <url|default> | runall | reload").withStyle(ChatFormatting.RED));
+            out.append(Component.literal("\n  /dailycam webhook <name> <url|default> | runall | reload").withStyle(ChatFormatting.RED));
         }
+        out.append(Component.literal("\n/" + ALIAS + " is short for /" + COMMAND + ".").withStyle(ChatFormatting.GRAY));
         src.sendSuccess(() -> out, false);
         return 1;
     }
@@ -527,7 +537,7 @@ public final class CameraCommands {
         }
         CameraSpec cam = DailyCams.get().cameras().personalOf(player.getUUID());
         if (cam == null) {
-            src.sendFailure(Component.literal("You don't have a camera yet. Look at something nice and run /mc_setcamera."));
+            src.sendFailure(Component.literal("You don't have a camera yet. Look at something nice and run /dailycam set."));
         }
         return cam;
     }

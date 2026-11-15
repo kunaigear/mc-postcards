@@ -3,7 +3,7 @@
   "id": "dailycams",
   "version": "${version}",
   "name": "Daily Cams",
-  "description": "Players place virtual cameras with /mc_setcamera. Every day the server renders what each camera sees (using Camera Obscura) and posts the picture to a webhook.",
+  "description": "Players place virtual cameras with /dailycam set. Every day the server renders what each camera sees (using Camera Obscura) and posts the picture to a webhook.",
   "authors": ["kunaigear"],
   "license": "MIT",
   "environment": "*",

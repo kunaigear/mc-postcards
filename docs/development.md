@@ -38,7 +38,7 @@ Under `src/main/java/io/github/kunaigear/dailycams/`:
 
 | Path | Contents |
 |---|---|
-| `command/` | `/mc_setcamera` and `/mc_camera`. |
+| `command/` | The `/dailycam` command and its `/dcam` alias. |
 | `camera/` | The camera model and `cameras.json`. |
 | `render/` | The render queue, chunk loading, the bridge to Camera Obscura, the throttle and the shader. |
 | `schedule/` | The daily schedule. |

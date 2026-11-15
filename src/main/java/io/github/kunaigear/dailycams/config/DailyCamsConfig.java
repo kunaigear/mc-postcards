@@ -16,7 +16,7 @@ import java.util.Locale;
 
 /** {@code config/dailycams/config.json}. Field names are the JSON keys. */
 public final class DailyCamsConfig {
-    /** Default webhook for all cameras. A camera can override it with /mc_camera webhook. */
+    /** Default webhook for all cameras. A camera can override it with /dailycam webhook. */
     public String webhookUrl = "";
     /** "discord" (embed + attachment) or "generic" (multipart: "metadata" JSON + "file"). */
     public String webhookFormat = "discord";

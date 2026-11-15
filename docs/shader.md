@@ -24,7 +24,7 @@ of day.
 ## Turning it off
 
 - For every camera: `"shader": "none"` in the config.
-- For one camera: `/mc_camera shader none [name]`. Use `default` to follow the config again.
+- For one camera: `/dailycam shader none [name]`. Use `default` to follow the config again.
 
 ## Settings
 

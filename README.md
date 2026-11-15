@@ -1,7 +1,7 @@
 # Daily Cams
 
 **A daily photo of your Minecraft world, posted to Discord.** Players place virtual cameras with
-`/mc_setcamera`. Every day the server renders what each camera sees and sends the picture to a webhook.
+`/dailycam set`. Every day the server renders what each camera sees and sends the picture to a webhook.
 
 ![A village by the water, rendered by Daily Cams](docs/images/village.jpg)
 
@@ -32,8 +32,8 @@
    You need Minecraft 26.3, Fabric Loader 0.19.5 or newer, and Java 25.
 2. Start the server once. It creates `config/dailycams/config.json`.
 3. [Create a Discord webhook](docs/configuration.md#discord-webhook), put its URL in `webhookUrl`, and run
-   `/mc_camera reload`.
-4. In game, look at something nice and run `/mc_setcamera`. Click **[Preview now]** to get the first picture
+   `/dailycam reload`.
+4. In game, look at something nice and run `/dailycam set`. Click **[Preview now]** to get the first picture
    straight away. After that, one arrives every day at 12:00 (configurable).
 
 ## Documentation

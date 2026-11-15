@@ -11,15 +11,18 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * The server only knows where a player's body is. With a freecam mod, the view on screen is somewhere else, so a
- * plain {@code /mc_setcamera [name]} would place the camera at the body. This rewrites such a command, before it's
- * sent, into the explicit form {@code /mc_setcamera <name> <x y z> <yaw pitch>} using the view on screen. The
+ * plain {@code /dailycam set [name]} would place the camera at the body. This rewrites such a command, before it's
+ * sent, into the explicit form {@code /dailycam set <name> <x y z> <yaw pitch>} using the view on screen. The
  * server needs no changes: the explicit form is a normal command, checked with the normal permissions.
  */
 public final class DailyCamsClient implements ClientModInitializer {
-    private static final String COMMAND = "mc_setcamera";
+    /** The server's command and its alias, and the subcommand that places a camera. */
+    private static final Set<String> COMMANDS = Set.of("dailycam", "dcam");
+    private static final String SET = "set";
 
     /** A camera that has moved further than this from the player's eyes counts as detached from the body. */
     private static final double AWAY_DISTANCE = 1.5;
@@ -31,8 +34,8 @@ public final class DailyCamsClient implements ClientModInitializer {
 
     static String rewrite(String command) {
         String[] args = command.trim().split("\s+");
-        // Only the forms without a position: "mc_setcamera" and "mc_setcamera <name>".
-        if (!args[0].equals(COMMAND) || args.length > 2) {
+        // Only the forms without a position: "dailycam set" and "dailycam set <name>".
+        if (!COMMANDS.contains(args[0]) || args.length < 2 || !args[1].equals(SET) || args.length > 3) {
             return command;
         }
         Minecraft mc = Minecraft.getInstance();
@@ -45,9 +48,9 @@ public final class DailyCamsClient implements ClientModInitializer {
             return command;
         }
 
-        String name = args.length == 2 ? args[1] : player.getGameProfile().name();
+        String name = args.length == 3 ? args[2] : player.getGameProfile().name();
         Vec3 pos = camera.position();
-        String rewritten = String.format(Locale.ROOT, "%s %s %.3f %.3f %.3f %.2f %.2f", COMMAND, name,
+        String rewritten = String.format(Locale.ROOT, "%s %s %s %.3f %.3f %.3f %.2f %.2f", args[0], SET, name,
                 pos.x, pos.y, pos.z, Mth.wrapDegrees(camera.yRot()), camera.xRot());
         player.sendSystemMessage(Component.literal("[Daily Cams] Using your freecam view.").withStyle(ChatFormatting.GRAY));
         return rewritten;
