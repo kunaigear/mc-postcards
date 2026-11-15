@@ -77,6 +77,7 @@ message if they're online (`notifyOwners`).
 | `fov` | `70` | Default field of view. |
 | `renderDistance` | `16` | View distance in chunks (2–32), like Minecraft's own setting. Higher values are slower and load more chunks. |
 | `ssaa` | `2` | Supersampling (1 = off). |
+| `renderCpuShare` | `0.25` | How much of one CPU core a render may use (0.05–1.0). Lower values make renders slower and lighter on the server. See [Server performance](#server-performance). |
 | `imageFormat` | `"png"` | `png` or `jpg`. A PNG larger than `maxUploadBytes` is sent as a JPEG instead. |
 | `maxUploadBytes` | ~10 MB | Discord's default upload limit for webhooks. |
 | `keepLocalCopies` | `true` | Saves each picture under `config/dailycams/renders/<camera>/`. |
@@ -92,23 +93,44 @@ restarts neither skip a run nor repeat one.
 ## How it works
 
 1. At each scheduled time, all cameras are queued and rendered one at a time.
-2. For each camera, the mod adds a temporary chunk ticket around the camera. The ticket is not saved and
-   doesn't tick entities. The area loads and generates like it would for a player, without a player being
-   there.
-3. On a background thread, the mod builds fresh chunk meshes and renders the frame with Camera Obscura's
-   `WorldRenderer`, then encodes the image.
-4. The ticket is removed and the image is uploaded. HTTP 429 and 5xx responses are retried, and Discord's
+2. For each camera, the mod works out which chunks the camera can actually see (its view cone, up to
+   `renderDistance`), plus a one-chunk margin. It loads them with temporary chunk tickets, nearest first and only
+   a few at a time. The tickets aren't saved and don't tick entities. Missing terrain is generated as it would be
+   for a player.
+3. On a background thread, the mod builds geometry for the visible chunk sections and renders the frame with
+   Camera Obscura's `WorldRenderer`, then encodes the image.
+4. The tickets are removed and the image is uploaded. HTTP 429 and 5xx responses are retried, and Discord's
    `retry_after` is respected.
 
 The dedicated server's `pause-when-empty-seconds` would stop the game from ticking on an empty server. The
 schedule therefore runs on a wall-clock timer, and while renders are queued the mod keeps the server from
 pausing. Afterwards it may pause again.
 
-With the defaults (1280×720, 16 chunks), one render took about 17 seconds of background CPU time in testing.
-Most of that time goes into building the geometry of the chunk sections the camera can see; drawing the frame
-takes 1–2 seconds. Sections outside the view, beyond the view distance or outside the build height are skipped.
-The server thread is never blocked. Before rendering, a square of chunks `renderDistance + 1` around the camera
-is loaded, which is 35×35 chunks at the default.
+## Server performance
+
+Rendering is a background job that gives way to the game:
+
+- **CPU budget:** the render thread uses at most `renderCpuShare` of one core (default 25%). It works in slices of
+  a few milliseconds and sleeps in between, both while building geometry and while drawing.
+- **Backing off:** if a server tick takes longer than 25 ms, or starts late (for example because of GC or world
+  generation), the render thread and the chunk loader pause for a second.
+- **Gradual chunk loading:** at most 4 chunk requests are outstanding at once, and new ones are only made while
+  the server isn't busy. While it is busy, one chunk per second is still requested so that a permanently loaded
+  server finishes eventually.
+
+These numbers come from an emulated small host: 2 CPU cores, 3 GB heap and 200 mobs in force-loaded chunks. Each
+test rendered one camera over already-generated terrain and one over new terrain, at the default settings.
+
+| | Hitches > 100 ms | Worst second | Longest GC pause | Time per camera |
+|---|---|---|---|---|
+| Idle server | 4 per minute | 19 TPS | – | – |
+| Without throttling | 42 per minute | 6 TPS | 122 ms | 15–20 s |
+| **With throttling** | **6 per minute** | **17–19 TPS** | **42 ms** | **~80 s** |
+
+The remaining hitches mostly come from generating new terrain, which happens only the first time a camera renders
+an area and costs the same as a player exploring it. On later days the chunks load from disk, and the render is
+close to an idle server. With more cores or a higher `renderCpuShare`, renders finish faster. Each render logs
+how long it spent building, drawing and yielding to the server.
 
 ## Caveats
 
@@ -130,6 +152,8 @@ is loaded, which is 35×35 chunks at the default.
 
 The jar is written to `build/libs/`. `./gradlew runServer` starts a development server in `run/`.
 
-`./gradlew runDevtestServer` starts the same server with a dev-only test mod (`src/devtest`). Running `dctest` in
+`./gradlew runDevtestServer` starts the same server with a dev-only test mod (`src/devtest`). It also writes
+`run/dctest-ticks.csv`, a log of every tick's duration and what the renderer was doing at the time. Add
+`-PsmallServer` to emulate a 2-core host with a 3 GB heap and a GC log. Running `dctest` in
 its console runs the commands as fake players with op levels 0, 2 and 4 and logs every reply. The test mod is
 never included in the release jar.

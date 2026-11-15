@@ -6,10 +6,7 @@ import io.github.kunaigear.dailycams.mixin.ChunkMeshInvoker;
 import de.tomalbrc.cameraobscura.renderer.ChunkMeshCache;
 import de.tomalbrc.cameraobscura.renderer.WorldRenderer;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
-import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
-import org.joml.FrustumIntersection;
-import org.joml.Matrix4f;
 
 import java.awt.image.BufferedImage;
 import java.util.List;
@@ -18,8 +15,11 @@ import java.util.List;
 final class CameraRenderer {
     private CameraRenderer() {}
 
-    /** {@code renderDistance} is in blocks. */
-    record Settings(int width, int height, int fov, int renderDistance, int ssaa) {}
+    /** What the render thread is doing right now (diagnostics only). */
+    static volatile String stage = "building";
+
+    /** {@code renderDistance} is in blocks. {@code cpuShare} limits how much of one core the render may use. */
+    record Settings(int width, int height, int fov, int renderDistance, int ssaa, double cpuShare) {}
 
     /** Chunk radius Camera Obscura looks at for a given view distance (mirrors WorldRenderer). */
     static int chunkRadius(int renderDistance) {
@@ -27,69 +27,55 @@ final class CameraRenderer {
     }
 
     static BufferedImage render(ServerLevel level, double x, double y, double z, float yaw, float pitch, Settings s) {
-        int radius = chunkRadius(s.renderDistance());
-        BlockPos camPos = BlockPos.containing(x, y, z);
-        int cx = ChunkMeshCache.toChunkCoord(camPos.getX());
-        int cy = ChunkMeshCache.toChunkCoord(camPos.getY());
-        int cz = ChunkMeshCache.toChunkCoord(camPos.getZ());
-
-        Renderer renderer = new Renderer(level, s);
-        renderer.updateCamera(x, y, z, pitch, yaw);
-        FrustumIntersection frustum = renderer.frustum();
-
-        // Build fresh meshes for every section the renderer will look at. We never reuse Camera Obscura's
-        // cached ones: a mesh built while its chunk was unloaded would be empty and is never marked dirty.
-        // Sections that can't appear in the picture get an empty mesh instead of being built: outside the
-        // build height, entirely beyond the view distance (hidden by fog), or outside the view cone (the
-        // renderer culls those anyway). This is by far the most expensive step.
-        long meshStart = System.nanoTime();
-        int minSection = level.getMinY() >> 4;
-        int maxSection = (level.getMaxY()) >> 4;
-        double maxDistSq = (double) s.renderDistance() * s.renderDistance();
-        int built = 0;
-        Long2ObjectOpenHashMap<ChunkMeshCache.ChunkMesh> meshes = new Long2ObjectOpenHashMap<>();
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dy = -radius; dy <= radius; dy++) {
-                for (int dz = -radius; dz <= radius; dz++) {
-                    long key = ChunkMeshCache.chunkKeyFromCoords(cx + dx, cy + dy, cz + dz);
-                    BlockPos origin = ChunkMeshCache.chunkOriginFromKey(key);
-                    ChunkMeshCache.ChunkMesh mesh = ChunkMeshInvoker.dailycams$create(origin, key);
-                    int sectionY = cy + dy;
-                    if (sectionY < minSection || sectionY > maxSection
-                            || distanceSqToSection(x, y, z, origin) > maxDistSq
-                            || !frustum.testAab(origin.getX(), origin.getY(), origin.getZ(),
-                                    origin.getX() + 16, origin.getY() + 16, origin.getZ() + 16)) {
-                        mesh.setDrawCommands(List.of());
-                    } else {
-                        ChunkMeshCacheInvoker.dailycams$rebuildChunk(level, mesh);
-                        built++;
+        ViewVolume view = new ViewVolume(level, x, y, z, yaw, pitch, s);
+        Throttle.begin(s.cpuShare());
+        stage = "building";
+        try {
+            // Build fresh meshes for every section the renderer will look at. We never reuse Camera Obscura's
+            // cached ones: a mesh built while its chunk was unloaded would be empty and is never marked dirty.
+            // Sections that can't appear in the picture (outside the view cone, beyond the view distance or
+            // outside the build height) get an empty mesh instead. Building is by far the most expensive step.
+            long meshStart = System.nanoTime();
+            int built = 0;
+            Long2ObjectOpenHashMap<ChunkMeshCache.ChunkMesh> meshes = new Long2ObjectOpenHashMap<>();
+            for (int dx = -view.radius; dx <= view.radius; dx++) {
+                for (int dy = -view.radius; dy <= view.radius; dy++) {
+                    for (int dz = -view.radius; dz <= view.radius; dz++) {
+                        int sx = view.cx + dx, sy = view.cy + dy, sz = view.cz + dz;
+                        long key = ChunkMeshCache.chunkKeyFromCoords(sx, sy, sz);
+                        ChunkMeshCache.ChunkMesh mesh = ChunkMeshInvoker.dailycams$create(ChunkMeshCache.chunkOriginFromKey(key), key);
+                        if (view.sectionVisible(sx, sy, sz)) {
+                            ChunkMeshCacheInvoker.dailycams$rebuildChunk(level, mesh);
+                            built++;
+                            Throttle.checkpoint();
+                        } else {
+                            mesh.setDrawCommands(List.of());
+                        }
+                        meshes.put(key, mesh);
                     }
-                    meshes.put(key, mesh);
                 }
             }
-        }
-        long meshMs = (System.nanoTime() - meshStart) / 1_000_000;
+            long meshMs = (System.nanoTime() - meshStart) / 1_000_000;
 
-        PinnedMeshes.pin(level, meshes);
-        try {
-            long drawStart = System.nanoTime();
-            // Every mesh is pinned and clean, so this only reads the sky/fog/sun values for the frame.
-            renderer.updateChunksInRange(level, false);
-            BufferedImage image = renderer.render();
-            DailyCams.LOGGER.info("Built {} chunk sections in {} ms, drew the frame in {} ms",
-                    built, meshMs, (System.nanoTime() - drawStart) / 1_000_000);
-            return image;
+            PinnedMeshes.pin(level, meshes);
+            try {
+                stage = "drawing";
+                long drawStart = System.nanoTime();
+                Renderer renderer = new Renderer(level, s);
+                renderer.updateCamera(x, y, z, pitch, yaw);
+                // Every mesh is pinned and clean, so this only reads the sky/fog/sun values for the frame.
+                renderer.updateChunksInRange(level, false);
+                BufferedImage image = renderer.render();
+                long drawMs = (System.nanoTime() - drawStart) / 1_000_000;
+                DailyCams.LOGGER.info("Built {} chunk sections in {} ms, drew the frame in {} ms ({} ms in total spent yielding to the server)",
+                        built, meshMs, drawMs, Throttle.sleptMs());
+                return image;
+            } finally {
+                PinnedMeshes.clear();
+            }
         } finally {
-            PinnedMeshes.clear();
+            Throttle.end();
         }
-    }
-
-    /** Squared distance from the camera to the closest point of a 16³ section. */
-    private static double distanceSqToSection(double x, double y, double z, BlockPos origin) {
-        double dx = Math.max(0, Math.max(origin.getX() - x, x - (origin.getX() + 16)));
-        double dy = Math.max(0, Math.max(origin.getY() - y, y - (origin.getY() + 16)));
-        double dz = Math.max(0, Math.max(origin.getZ() - z, z - (origin.getZ() + 16)));
-        return dx * dx + dy * dy + dz * dz;
     }
 
     /** WorldRenderer with a per-camera field of view instead of Camera Obscura's global one. */
@@ -97,11 +83,6 @@ final class CameraRenderer {
         Renderer(ServerLevel level, Settings s) {
             super(level, s.width(), s.height(), s.renderDistance(), s.ssaa());
             camera.setPerspective(Math.toRadians(s.fov()), (double) s.width() / s.height(), 0.1f, s.renderDistance());
-        }
-
-        /** The same view-cone test the renderer applies to chunk sections. */
-        FrustumIntersection frustum() {
-            return new FrustumIntersection(new Matrix4f(camera.getProjectionMatrix()).mul(camera.getViewMatrix()));
         }
     }
 }

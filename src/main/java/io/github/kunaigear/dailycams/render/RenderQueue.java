@@ -27,7 +27,9 @@ import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
+import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -82,6 +84,12 @@ public final class RenderQueue {
         return active == null ? null : active.request.camera.name;
     }
 
+    /** "loading", "building", "drawing" or null when idle. For diagnostics. */
+    public @Nullable String activeStage() {
+        if (active == null) return null;
+        return active.phase == Phase.RENDERING ? CameraRenderer.stage : "loading";
+    }
+
     public void tick(MinecraftServer server) {
         if (active == null) {
             Request next = pending.poll();
@@ -111,16 +119,21 @@ public final class RenderQueue {
     }
 
     private final class Active {
+        /** Never request more chunks at once than this, so loading/generation can't flood the server. */
+        static final int MAX_IN_FLIGHT = 4;
+        static final int MAX_NEW_PER_TICK = 2;
+
         final Request request;
         final ServerLevel level;
         final CameraRenderer.Settings settings;
-        final ChunkPos center;
-        final int chunkRadius;
-        final int ticketRadius;
-        final int startTick;
+        final List<ChunkPos> toLoad;
+        final List<ChunkPos> ticketed = new ArrayList<>();
+        final List<ChunkPos> pending = new ArrayList<>();
+        int nextToLoad;
+        int lastProgressTick;
+        int lastRequestTick;
         Phase phase = Phase.LOADING;
         int settleUntil;
-        boolean ticketHeld;
 
         Active(Request request, ServerLevel level, int tick) {
             this.request = request;
@@ -128,26 +141,35 @@ public final class RenderQueue {
             DailyCamsConfig cfg = request.config;
             CameraSpec cam = request.camera;
             this.settings = new CameraRenderer.Settings(cfg.width, cfg.height,
-                    cam.fov != null ? cam.fov : cfg.fov, cfg.renderDistanceBlocks(), cfg.ssaa);
-            this.center = new ChunkPos((int) Math.floor(cam.x) >> 4, (int) Math.floor(cam.z) >> 4);
-            this.chunkRadius = CameraRenderer.chunkRadius(cfg.renderDistanceBlocks());
-            // One extra ring so edge chunks have neighbours for lighting and ambient occlusion.
-            this.ticketRadius = chunkRadius + 1;
-            this.startTick = tick;
-            level.getChunkSource().addTicketWithRadius(ticketType, center, ticketRadius);
-            ticketHeld = true;
-            DailyCams.LOGGER.info("Rendering camera '{}' at {}", cam.name, cam.describePosition());
+                    cam.fov != null ? cam.fov : cfg.fov, cfg.renderDistanceBlocks(), cfg.ssaa, cfg.renderCpuShare);
+            // Only the chunks the camera can actually see (plus a margin), nearest first.
+            this.toLoad = new ViewVolume(level, cam.x, cam.y, cam.z, cam.yaw, cam.pitch, settings).columnsToLoad();
+            this.lastProgressTick = tick;
+            DailyCams.LOGGER.info("Rendering camera '{}' at {} ({} chunks to load)", cam.name, cam.describePosition(), toLoad.size());
         }
 
         void tick(MinecraftServer server) {
             int now = server.getTickCount();
             switch (phase) {
                 case LOADING -> {
-                    if (allChunksLoaded()) {
+                    var source = level.getChunkSource();
+                    if (pending.removeIf(p -> source.getChunkNow(p.x(), p.z()) != null)) lastProgressTick = now;
+                    // Request chunks a few at a time while the server has time to spare. While it is busy,
+                    // still trickle one chunk per second so a permanently loaded server finishes eventually.
+                    boolean busy = DailyCams.serverBusy();
+                    int budget = !busy ? MAX_NEW_PER_TICK : (now - lastRequestTick >= 20 ? 1 : 0);
+                    for (int i = 0; i < budget && pending.size() < MAX_IN_FLIGHT && nextToLoad < toLoad.size(); i++) {
+                        ChunkPos p = toLoad.get(nextToLoad++);
+                        source.addTicketWithRadius(ticketType, p, 0);
+                        ticketed.add(p);
+                        lastRequestTick = now;
+                        if (source.getChunkNow(p.x(), p.z()) == null) pending.add(p);
+                    }
+                    if (nextToLoad >= toLoad.size() && pending.isEmpty()) {
                         phase = Phase.SETTLING;
                         settleUntil = now + SETTLE_TICKS;
-                    } else if (now - startTick > request.config.chunkLoadTimeoutSeconds * 20) {
-                        DailyCams.LOGGER.warn("Chunks around camera '{}' did not finish loading within {}s; rendering anyway",
+                    } else if (now - lastProgressTick > request.config.chunkLoadTimeoutSeconds * 20) {
+                        DailyCams.LOGGER.warn("Chunk loading for camera '{}' made no progress for {}s; rendering with what is loaded",
                                 request.camera.name, request.config.chunkLoadTimeoutSeconds);
                         phase = Phase.SETTLING;
                         settleUntil = now;
@@ -167,21 +189,11 @@ public final class RenderQueue {
             }
         }
 
-        boolean allChunksLoaded() {
-            var source = level.getChunkSource();
-            for (int x = -chunkRadius; x <= chunkRadius; x++) {
-                for (int z = -chunkRadius; z <= chunkRadius; z++) {
-                    if (source.getChunkNow(center.x() + x, center.z() + z) == null) return false;
-                }
-            }
-            return true;
-        }
-
         void releaseTicket() {
-            if (ticketHeld) {
-                level.getChunkSource().removeTicketWithRadius(ticketType, center, ticketRadius);
-                ticketHeld = false;
-            }
+            var source = level.getChunkSource();
+            for (ChunkPos p : ticketed) source.removeTicketWithRadius(ticketType, p, 0);
+            ticketed.clear();
+            pending.clear();
         }
 
         void onRendered(@Nullable BufferedImage image, @Nullable Throwable error, long startedNanos) {

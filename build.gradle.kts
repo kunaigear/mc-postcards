@@ -78,6 +78,10 @@ loom {
             server()
             source(devtest)
             runDir("run")
+            // Pass -PsmallServer to emulate a 2-core host with a 3 GB heap and log GC pauses.
+            if (project.hasProperty("smallServer")) {
+                vmArgs("-XX:ActiveProcessorCount=2", "-Xmx3G", "-Xlog:gc:file=gc.log:uptime,level,tags")
+            }
         }
     }
 }

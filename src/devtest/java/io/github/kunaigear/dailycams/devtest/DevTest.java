@@ -24,6 +24,7 @@ public final class DevTest implements ModInitializer {
 
     @Override
     public void onInitialize() {
+        TickProfiler.register();
         CommandRegistrationCallback.EVENT.register((dispatcher, registries, env) ->
                 dispatcher.register(Commands.literal("dctest").executes(ctx -> {
                     run(ctx.getSource().getServer());

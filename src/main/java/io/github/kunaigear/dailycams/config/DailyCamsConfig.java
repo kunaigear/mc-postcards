@@ -39,6 +39,11 @@ public final class DailyCamsConfig {
     public int renderDistance = 16;
     /** Supersampling factor (1 = off). */
     public int ssaa = 2;
+    /**
+     * How much of one CPU core a render may use (0.05-1.0). The render also pauses for a second whenever a
+     * server tick takes longer than 25 ms or starts late. Lower = slower renders, less competition.
+     */
+    public double renderCpuShare = 0.25;
 
     /** "png" or "jpg". PNG falls back to JPEG automatically when it is larger than maxUploadBytes. */
     public String imageFormat = "png";
@@ -90,6 +95,7 @@ public final class DailyCamsConfig {
         fov = Mth.clamp(fov, 30, 110);
         renderDistance = Mth.clamp(renderDistance, 2, 32);
         ssaa = Mth.clamp(ssaa, 1, 4);
+        renderCpuShare = Mth.clamp(renderCpuShare, 0.05, 1.0);
         jpegQuality = Mth.clamp(jpegQuality, 0.1f, 1f);
         namedCameraLimit = Math.max(0, namedCameraLimit);
         testCooldownSeconds = Math.max(0, testCooldownSeconds);

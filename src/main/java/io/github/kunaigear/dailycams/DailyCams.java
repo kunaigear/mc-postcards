@@ -35,6 +35,16 @@ public final class DailyCams implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("DailyCams");
 
     private static DailyCams instance;
+    private static volatile long lastTickNanos;
+    private static volatile long busyUntilNanos;
+    private static long tickStartNanos;
+    private static long previousTickStartNanos;
+
+    /** A tick slower than this, or a gap between tick starts longer than this, counts as the server struggling. */
+    private static final long SLOW_TICK_NANOS = 25_000_000;
+    private static final long TICK_GAP_NANOS = 60_000_000;
+    /** After the server struggled, background work stays paused this long. */
+    private static final long BUSY_COOLDOWN_NANOS = 1_000_000_000;
 
     private Path dir;
     private TicketType ticketType;
@@ -46,6 +56,14 @@ public final class DailyCams implements ModInitializer {
 
     public static DailyCams get() {
         return instance;
+    }
+
+    /**
+     * True while the server is struggling or recently was: its last tick was slow, or a tick started late.
+     * Background work (chunk requests, the render thread) waits while this is true.
+     */
+    public static boolean serverBusy() {
+        return System.nanoTime() < busyUntilNanos;
     }
 
     @Override
@@ -86,8 +104,19 @@ public final class DailyCams implements ModInitializer {
             if (queue != null) queue.shutdown();
             queue = null;
         });
+        ServerTickEvents.START_SERVER_TICK.register(server -> {
+            previousTickStartNanos = tickStartNanos;
+            tickStartNanos = System.nanoTime();
+            // A late tick means something (GC, world generation, our render) starved the server thread.
+            if (previousTickStartNanos != 0 && tickStartNanos - previousTickStartNanos > TICK_GAP_NANOS) {
+                busyUntilNanos = tickStartNanos + BUSY_COOLDOWN_NANOS;
+            }
+        });
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             if (queue != null) queue.tick(server);
+            long end = System.nanoTime();
+            lastTickNanos = end - tickStartNanos;
+            if (lastTickNanos > SLOW_TICK_NANOS) busyUntilNanos = end + BUSY_COOLDOWN_NANOS;
         });
     }
 
