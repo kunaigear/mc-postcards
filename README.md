@@ -74,14 +74,15 @@ message if they're online (`notifyOwners`).
 | `scheduleTimes` | `["12:00"]` | One or more `HH:mm` times per day. |
 | `timeZone` | `""` | For example `Europe/Berlin`. If empty, the server's time zone is used. |
 | `catchUpMissedRuns` | `true` | If the server was offline at the scheduled time, render as soon as it starts. |
-| `width`, `height` | `1280`, `720` | Picture size. |
+| `width`, `height` | `1920`, `1080` | Picture size. |
 | `fov` | `70` | Default field of view. |
 | `renderDistance` | `16` | View distance in chunks (2–32), like Minecraft's own setting. Higher values are slower and load more chunks. |
 | `ssaa` | `2` | Supersampling (1 = off). |
 | `shader` | `"simple"` | `simple` adds sun shadows, warm light, haze, bloom and a colour grade (see [Shader](#shader)). `none` gives plain Camera Obscura output. |
 | `shaderSettings` | | Strength of each shader effect: `shadowStrength`, `sunWarmth`, `haze`, `bloom`, `saturation`, `contrast`, `vignette`. |
 | `renderCpuShare` | `0.25` | How much of one CPU core a render may use (0.05–1.0). Lower values make renders slower and lighter on the server. See [Server performance](#server-performance). |
-| `imageFormat` | `"png"` | `png` or `jpg`. A PNG larger than `maxUploadBytes` is sent as a JPEG instead. |
+| `imageFormat` | `"jpg"` | `jpg` or `png`. JPEGs keep full colour resolution (4:4:4), so block edges stay crisp. At 1080p a JPEG is usually 0.6–1 MB and a PNG 3–4 MB. A PNG larger than `maxUploadBytes` is sent as a JPEG instead. |
+| `jpegQuality` | `0.9` | JPEG quality (0.1–1.0). |
 | `maxUploadBytes` | ~10 MB | Discord's default upload limit for webhooks. |
 | `keepLocalCopies` | `true` | Saves each picture under `config/dailycams/renders/<camera>/`. |
 | `localCopyRetentionDays` | `30` | Local copies older than this are deleted. `0` keeps them forever. |
@@ -121,7 +122,7 @@ With `"shader": "simple"` (the default), a post-processing pass runs after Camer
 - **Haze, bloom and grading:** distant terrain fades a little towards the sky colour, bright areas get a soft glow,
   and a light contrast/saturation grade and a vignette finish the picture.
 
-It adds 1–4 seconds per camera. The pass yields to the server like the rest of the render: in the 2-core test
+It adds 1–9 seconds per camera, depending on resolution and CPU. The pass yields to the server like the rest of the render: in the 2-core test
 below, the shading phase caused no hitches at all. Every strength can be tuned in `shaderSettings`, and
 `/mc_camera shader none` turns it off for a single camera.
 
@@ -144,7 +145,12 @@ test rendered one camera over already-generated terrain and one over new terrain
 |---|---|---|---|---|
 | Idle server | 4 per minute | 19 TPS | – | – |
 | Without throttling | 42 per minute | 6 TPS | 122 ms | 15–20 s |
-| **With throttling** | **6 per minute** | **17–19 TPS** | **42 ms** | **~80 s** |
+| **With throttling, 720p PNG** | **6–7 per minute** | **17–19 TPS** | **42–75 ms** | **50–90 s** |
+| **With throttling, 1080p JPEG (default)** | **5 per minute** | **19–20 TPS** | **61 ms** | **53–95 s** |
+
+Both throttled rows were measured with the shader on. Going from 720p to 1080p makes a render about 6% slower,
+because most of the time goes into building chunk geometry, which doesn't depend on resolution. The difference in
+hitches between the two rows is within run-to-run noise.
 
 The remaining hitches mostly come from generating new terrain, which happens only the first time a camera renders
 an area and costs the same as a player exploring it. On later days the chunks load from disk, and the render is

@@ -16,7 +16,12 @@ import org.jetbrains.annotations.Nullable;
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageTypeSpecifier;
 import javax.imageio.ImageWriter;
+import javax.imageio.metadata.IIOMetadata;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 import javax.imageio.stream.MemoryCacheImageOutputStream;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
@@ -222,7 +227,10 @@ public final class RenderQueue {
         String stamp = FILE_TIME.format(takenAt.atZone(cfg.zone()));
         WebhookSender.Image image;
         try {
+            long encodeStart = System.nanoTime();
             image = encode(toRgb(raw), cfg, cam.name + "_" + stamp);
+            DailyCams.LOGGER.info("Encoded camera '{}' as {} ({} KiB) in {} ms", cam.name, image.mimeType(),
+                    image.bytes().length / 1024, (System.nanoTime() - encodeStart) / 1_000_000);
         } catch (IOException e) {
             return new Result(cam, false, "Could not encode image: " + e.getMessage(), null);
         }
@@ -285,11 +293,33 @@ public final class RenderQueue {
             ImageWriteParam param = writer.getDefaultWriteParam();
             param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
             param.setCompressionQuality(quality);
-            writer.write(null, new IIOImage(image, null, null), param);
+            IIOMetadata metadata = writer.getDefaultImageMetadata(ImageTypeSpecifier.createFromRenderedImage(image), param);
+            disableChromaSubsampling(metadata);
+            writer.write(null, new IIOImage(image, null, metadata), param);
         } finally {
             writer.dispose();
         }
         return out.toByteArray();
+    }
+
+    /**
+     * JPEG normally stores colour at half resolution (4:2:0), which smears the hard colour edges of
+     * Minecraft's pixel-art textures. Keep full colour resolution (4:4:4) instead.
+     */
+    private static void disableChromaSubsampling(IIOMetadata metadata) {
+        try {
+            String format = "javax_imageio_jpeg_image_1.0";
+            Node root = metadata.getAsTree(format);
+            NodeList components = ((Element) root).getElementsByTagName("componentSpec");
+            for (int i = 0; i < components.getLength(); i++) {
+                Element c = (Element) components.item(i);
+                c.setAttribute("HsamplingFactor", "1");
+                c.setAttribute("VsamplingFactor", "1");
+            }
+            metadata.setFromTree(format, root);
+        } catch (Exception e) {
+            DailyCams.LOGGER.debug("Could not disable JPEG chroma subsampling", e);
+        }
     }
 
     private static BufferedImage toRgb(BufferedImage src) {

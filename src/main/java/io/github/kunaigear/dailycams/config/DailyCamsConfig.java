@@ -32,8 +32,8 @@ public final class DailyCamsConfig {
     /** If the server was offline at a scheduled time, run as soon as it is up again. */
     public boolean catchUpMissedRuns = true;
 
-    public int width = 1280;
-    public int height = 720;
+    public int width = 1920;
+    public int height = 1080;
     public int fov = 70;
     /** View distance in chunks, like Minecraft's own setting. Higher = slower render and more chunks loaded. */
     public int renderDistance = 16;
@@ -66,7 +66,7 @@ public final class DailyCamsConfig {
     }
 
     /** "png" or "jpg". PNG falls back to JPEG automatically when it is larger than maxUploadBytes. */
-    public String imageFormat = "png";
+    public String imageFormat = "jpg";
     public float jpegQuality = 0.9f;
     /** Discord's default webhook upload limit is 10 MiB. */
     public long maxUploadBytes = 10L * 1024 * 1024 - 64 * 1024;
@@ -130,9 +130,9 @@ public final class DailyCamsConfig {
             DailyCams.LOGGER.warn("Unknown webhookFormat '{}', using 'discord'", webhookFormat);
             webhookFormat = "discord";
         }
-        imageFormat = imageFormat == null ? "png" : imageFormat.toLowerCase(Locale.ROOT);
+        imageFormat = imageFormat == null ? "jpg" : imageFormat.toLowerCase(Locale.ROOT);
         if (imageFormat.equals("jpeg")) imageFormat = "jpg";
-        if (!imageFormat.equals("png") && !imageFormat.equals("jpg")) imageFormat = "png";
+        if (!imageFormat.equals("png") && !imageFormat.equals("jpg")) imageFormat = "jpg";
 
         shader = shader == null ? "simple" : shader.toLowerCase(Locale.ROOT);
         if (!shader.equals("simple") && !shader.equals("none")) {
