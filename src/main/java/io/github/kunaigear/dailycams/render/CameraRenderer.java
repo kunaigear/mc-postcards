@@ -8,6 +8,9 @@ import de.tomalbrc.cameraobscura.renderer.WorldRenderer;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import io.github.kunaigear.dailycams.config.DailyCamsConfig;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4d;
 import org.joml.Vector3d;
@@ -68,6 +71,9 @@ final class CameraRenderer {
                 long drawStart = System.nanoTime();
                 Renderer renderer = new Renderer(level, s);
                 renderer.updateCamera(x, y, z, pitch, yaw);
+                // Someone standing where the camera is (typically its owner right after placing it) would
+                // otherwise fill the picture with the inside of their own head.
+                renderer.entity = entityAtCamera(level, x, y, z);
                 // Every mesh is pinned and clean, so this only reads the sky/fog/sun values for the frame.
                 renderer.updateChunksInRange(level, false);
                 BufferedImage image = renderer.render();
@@ -90,8 +96,32 @@ final class CameraRenderer {
         }
     }
 
+    /** The entity whose body contains the camera position, if any (closest eye wins). */
+    private static @Nullable Entity entityAtCamera(ServerLevel level, double x, double y, double z) {
+        Vec3 cam = new Vec3(x, y, z);
+        Entity best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (Entity e : level.getEntities((Entity) null, AABB.ofSize(cam, 4, 4, 4))) {
+            if (!e.getBoundingBox().inflate(0.3).contains(cam)) continue;
+            double d = e.getEyePosition().distanceToSqr(cam);
+            if (d < bestDist) {
+                bestDist = d;
+                best = e;
+            }
+        }
+        return best;
+    }
+
     /** WorldRenderer with a per-camera field of view instead of Camera Obscura's global one. */
     private static final class Renderer extends WorldRenderer {
+        /**
+         * Camera Obscura moves the camera to {@link #entity}'s eyes before drawing. We only use that field to
+         * hide an entity standing at the camera, so keep our own position and rotation.
+         */
+        @Override
+        public void updateCamera(Entity entity) {
+        }
+
         Renderer(ServerLevel level, Settings s) {
             super(level, s.width(), s.height(), s.renderDistance(), s.ssaa());
             camera.setPerspective(Math.toRadians(s.fov()), (double) s.width() / s.height(), 0.1f, s.renderDistance());

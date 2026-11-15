@@ -85,3 +85,9 @@ loom {
         }
     }
 }
+
+// The dev test mod as a standalone jar, for trying it on a production server next to other mods.
+tasks.register<Jar>("devtestJar") {
+    archiveBaseName = "daily-cams-devtest"
+    from(devtest.output)
+}

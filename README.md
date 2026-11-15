@@ -157,6 +157,24 @@ an area and costs the same as a player exploring it. On later days the chunks lo
 close to an idle server. With more cores or a higher `renderCpuShare`, renders finish faster. Each render logs
 how long it spent building, drawing and yielding to the server.
 
+## Compatibility
+
+Daily Cams only runs on the server. Players don't need it, and it sends them nothing but chat messages.
+
+Tested together on a production Fabric 26.3 server (loader 0.20.1), with a player client joining it:
+
+| Mod | Where | Result |
+|---|---|---|
+| Lithium 0.26.3, FerriteCore 9.0.0, Krypton 0.3.2, spark 1.10.187 | server | No conflicts. |
+| C2ME 0.4.2-alpha | server | Works, and renders get faster because chunks load and generate faster. |
+| ScalableLux 0.3.0-alpha | server | Works. Lighting and shader shadows are correct with its light engine. |
+| Jade 26.3.5, JEI 31.17 | server + client | Works. Players with Jade/JEI stay connected while holding Camera Obscura's camera item, a Polymer item. |
+| Voxy 0.2.20-beta + Sodium | client | Works. Voxy is a client mod and isn't needed on the server, though it does no harm there. |
+
+Voxy 0.2.20-beta crashes on joining any world with the newest Sodium beta (0.9.3-beta.5). Players need the Sodium
+version Voxy was built against, **0.9.3-beta.1**. This is a Voxy/Sodium issue that also happens in singleplayer.
+ModernFix had no 26.3 build at the time of testing.
+
 ## Caveats
 
 - **Camera Obscura internals.** This mod uses parts of Camera Obscura that aren't a public API: its
