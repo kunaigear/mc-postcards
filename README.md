@@ -10,6 +10,7 @@
 - **Real 3D renders**, made on the server by [Camera Obscura](https://modrinth.com/mod/camera-obscura): 1920×1080,
   16 chunks of view distance, with a choice of two built-in shaders: a light one with sun shadows, or a
   [realistic one](docs/shader.md#realistic) with a physical sky, soft shadows and water reflections.
+- **Distant terrain** out to 64 chunks, like Voxy: far hills, coasts and mountains from the saved world.
 - **One camera per player**, named after them. Staff can add named cameras.
 - **Gentle on the server:** renders run in the background and give way to the game. TPS stays at 20 even on a
   2-core host ([measurements](docs/performance.md)).
@@ -44,6 +45,7 @@
 | [Cameras, commands and permissions](docs/usage.md) | Personal and named cameras, every command, permission tiers and LuckPerms nodes. |
 | [Configuration](docs/configuration.md) | Discord setup, schedule, picture size, every `config.json` option. |
 | [Shaders](docs/shader.md) | The simple and realistic shaders, with pictures, settings and cost. |
+| [Distant terrain](docs/distant-terrain.md) | Voxy-style terrain out to 64 chunks, from the saved world. |
 | [Performance](docs/performance.md) | How rendering stays out of the server's way, with measurements. |
 | [Compatibility](docs/compatibility.md) | Tested mods (Lithium, C2ME, ScalableLux, Jade, JEI, Voxy…) and what players need. |
 | [Development](docs/development.md) | Building, test servers and making a release. |

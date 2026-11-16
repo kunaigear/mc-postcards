@@ -47,6 +47,17 @@ public final class DailyCamsConfig {
     public double renderCpuShare = 0.25;
 
     /**
+     * How far distant terrain is drawn, in chunks (like Voxy or Distant Horizons). Beyond renderDistance, terrain
+     * is drawn as a simplified height map built from the chunks the server has saved. 0 = off. Only explored
+     * (saved) terrain appears.
+     */
+    public int lodDistance = 64;
+
+    public int lodDistanceBlocks() {
+        return lodDistance * 16;
+    }
+
+    /**
      * "simple" (sun shadows, warm light, haze, bloom, colour grade), "realistic" (relit from scratch: physical sky,
      * soft shadows, water reflections, filmic tone mapping) or "none" (plain Camera Obscura output).
      */
@@ -163,6 +174,7 @@ public final class DailyCamsConfig {
         fov = Mth.clamp(fov, 30, 110);
         renderDistance = Mth.clamp(renderDistance, 2, 32);
         ssaa = Mth.clamp(ssaa, 1, 4);
+        lodDistance = lodDistance <= 0 ? 0 : Mth.clamp(lodDistance, renderDistance + 1, 128);
         renderCpuShare = Mth.clamp(renderCpuShare, 0.05, 1.0);
         jpegQuality = Mth.clamp(jpegQuality, 0.1f, 1f);
         namedCameraLimit = Math.max(0, namedCameraLimit);

@@ -29,7 +29,8 @@ final class CameraRenderer {
 
     /** {@code renderDistance} is in blocks. {@code cpuShare} limits how much of one core the render may use. */
     record Settings(int width, int height, int fov, int renderDistance, int ssaa, double cpuShare,
-                    String shader, DailyCamsConfig.ShaderSettings simple, DailyCamsConfig.RealisticSettings realistic) {}
+                    String shader, DailyCamsConfig.ShaderSettings simple, DailyCamsConfig.RealisticSettings realistic,
+                    int lodDistance) {}
 
     /** Chunk radius Camera Obscura looks at for a given view distance (mirrors WorldRenderer). */
     static int chunkRadius(int renderDistance) {
@@ -94,22 +95,40 @@ final class CameraRenderer {
                 boolean realistic = "realistic".equals(s.shader());
                 // The realistic shader relights the frame, so it records what each pixel shows while drawing.
                 GBuffer gbuffer = realistic ? new GBuffer(s.width(), s.height(), s.ssaa(), s.width() * s.ssaa()) : null;
+                // With distant terrain, Camera Obscura's fog would end the near terrain in a wall of fog.
+                // Not where the world has a roof (the Nether): the saved height maps would show only the roof.
+                boolean lodOn = s.lodDistance() > s.renderDistance() && !level.dimensionType().hasCeiling();
                 BufferedImage image;
                 if (gbuffer != null) gbuffer.activate();
+                RenderFlags.noFog(lodOn);
                 try {
                     image = renderer.render();
                 } finally {
                     GBuffer.deactivate();
+                    RenderFlags.noFog(false);
                 }
                 long drawMs = (System.nanoTime() - drawStart) / 1_000_000;
-                long shadeMs = 0;
-                if (!"none".equals(s.shader())) {
-                    stage = "shading";
-                    long shadeStart = System.nanoTime();
-                    if (gbuffer != null) RealisticShader.apply(image, renderer.frame(), gbuffer, level, s.realistic());
-                    else SimpleShader.apply(image, renderer.frame(), level, s.simple());
-                    shadeMs = (System.nanoTime() - shadeStart) / 1_000_000;
+
+                LodTerrain lod = null;
+                long lodMs = 0;
+                if (lodOn) {
+                    stage = "lod";
+                    long lodStart = System.nanoTime();
+                    double hfov = 2 * Math.atan(Math.tan(Math.toRadians(s.fov()) / 2) * s.width() / s.height());
+                    lod = LodTerrain.build(level, x, z, yaw, hfov, s.renderDistance() * 0.75, s.lodDistance());
+                    lodMs = (System.nanoTime() - lodStart) / 1_000_000;
                 }
+                long shadeMs = 0;
+                stage = "shading";
+                long shadeStart = System.nanoTime();
+                if (gbuffer != null) {
+                    RealisticShader.apply(image, renderer.frame(), gbuffer, level, s.realistic(), lod, s.lodDistance());
+                } else {
+                    if (lod != null) LodSimple.apply(image, renderer.frame(), lod, level, s.simple(), s.lodDistance());
+                    if (!"none".equals(s.shader())) SimpleShader.apply(image, renderer.frame(), level, s.simple());
+                }
+                shadeMs = (System.nanoTime() - shadeStart) / 1_000_000;
+                if (lodOn) DailyCams.LOGGER.info("Distant terrain: {} ms to read", lodMs);
                 DailyCams.LOGGER.info("Built {} chunk sections in {} ms, drew the frame in {} ms, shader {} ms ({} ms in total spent yielding to the server)",
                         built, meshMs, drawMs, shadeMs, Throttle.sleptMs());
                 return image;

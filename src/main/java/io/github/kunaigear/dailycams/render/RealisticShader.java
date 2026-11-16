@@ -38,7 +38,11 @@ final class RealisticShader {
     /** How much of the sky's light reaches surfaces in shade. Below 1 for deeper, more contrasty shadows. */
     private static final double SHADE = 0.72;
 
-    static void apply(BufferedImage image, SimpleShader.Frame f, GBuffer gb, Level level, DailyCamsConfig.RealisticSettings st) {
+    /**
+     * {@code lod}: distant terrain beyond the render distance (or null), drawn up to {@code lodFar} blocks.
+     */
+    static void apply(BufferedImage image, SimpleShader.Frame f, GBuffer gb, Level level, DailyCamsConfig.RealisticSettings st,
+                      @org.jetbrains.annotations.Nullable LodTerrain lod, double lodFar) {
         int w = image.getWidth(), h = image.getHeight(), n = w * h;
         int[] px = ((DataBufferInt) image.getRaster().getDataBuffer()).getData();
         double[] depth = f.framebuffer().getDepthBuffer();
@@ -61,6 +65,17 @@ final class RealisticShader {
                 moonBrightness, Math.clamp(cam.y - 63, 0, 3000) + 100, overcast);
         long clock = level.getDefaultClockTime(), day = clock / 24000;
         Sky sky = new Sky(atm, cam, st, overcast, starBrightness, day, clock % 24000);
+        sky.dimensionLight = level.dimensionType().ambientLight();
+        if (!level.dimensionType().hasSkyLight()) {
+            // The Nether and the End have no sky to speak of: their background is the dimension's fog colour.
+            int fc = f.fogColor();
+            sky.flat = new double[]{toLinear(((fc >> 16) & 255) / 255.0) * 0.08, toLinear(((fc >> 8) & 255) / 255.0) * 0.08,
+                    toLinear((fc & 255) / 255.0) * 0.08};
+        }
+        // Where the world fades into the sky: the end of the distant terrain if there is any.
+        double fadeEnd = lod != null ? lodFar : renderDistance;
+        double lodStart = renderDistance * 0.75;
+        LodTerrain.Hit lodHit = new LodTerrain.Hit(), shadowHit = new LodTerrain.Hit();
 
         // The light that casts shadows: the sun by day, the moon by night.
         boolean sunLight = atm.sy > 0 || atm.sy > atm.my;
@@ -115,6 +130,7 @@ final class RealisticShader {
         boolean[] surface = new boolean[n];
         float[] meter = new float[n];
         double[] c = new double[3], s = new double[3], amb = new double[3], opq = new double[3], haze = new double[3], d = new double[3];
+        double[] scratch = new double[3];
         for (int y = 0; y < h; y++) {
             Throttle.checkpoint();
             int fbYBase = (h - 1 - y) * scale;
@@ -130,9 +146,24 @@ final class RealisticShader {
                 }
                 boolean opaque = Float.isFinite(dist[i]);
                 boolean translucent = gb.tDist[i] < (opaque ? dist[i] : Float.POSITIVE_INFINITY);
-                if (bg > 0 || (!opaque && !translucent)) sky.radiance(d[0], d[1], d[2], true, s);
+                // What's behind the near terrain: distant (LOD) terrain if a ray finds some, otherwise the sky.
+                boolean lodBg = false;
+                double lodMeter = 0;
+                if (bg > 0 || (!opaque && !translucent)) {
+                    if (lod != null && lod.trace(cam.x, cam.y, cam.z, d[0], d[1], d[2], lodStart, lodFar, lodHit)) {
+                        lodMeter = shadeLod(lod, lodHit, shadowHit, d, cam, atm, sky, st, lx, ly, lz, lightIrr, lightUp,
+                                overcast, fadeEnd, amb, haze, scratch, s);
+                        lodBg = true;
+                    } else {
+                        sky.radiance(d[0], d[1], d[2], true, s);
+                    }
+                }
                 if (bg == samples || (!opaque && !translucent)) {
                     store(hr, hg, hb, i, s);
+                    if (lodBg) {
+                        surface[i] = true;
+                        meter[i] = (float) lodMeter;
+                    }
                     continue;
                 }
 
@@ -174,7 +205,8 @@ final class RealisticShader {
                     double tnx = GBuffer.nx(tnp), tny = GBuffer.ny(tnp), tnz = GBuffer.nz(tnp);
                     BlockState tstate = blocks.getBlockState(cursor.set(Mth.floor(wx - tnx * 0.02), Mth.floor(wy - tny * 0.02), Mth.floor(wz - tnz * 0.02)));
                     if (tstate.getFluidState().is(FluidTags.WATER)) {
-                        shadeWater(gb, i, d, wx, wz, tnx, tny, tnz, opaque ? dist[i] - td : Double.POSITIVE_INFINITY, opq, atm, sky, st, c);
+                        shadeWater(gb.tAlbedo[i], GBuffer.sky(gb.tLight[i]), d, wx, wz, tnx, tny, tnz,
+                                opaque ? dist[i] - td : Double.POSITIVE_INFINITY, opq, atm, sky, st, c);
                     } else {
                         shadeGlass(gb, i, opq, atm, c);
                     }
@@ -184,29 +216,80 @@ final class RealisticShader {
                 }
 
                 meter[i] = (float) (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]);
-                // Aerial perspective: distant surfaces fade into the light of the atmosphere in front of them.
-                double py = cam.y + d[1] * surfDist;
-                double height = Math.exp(-Math.max(0, (py + cam.y) * 0.5 - 64) / 140);
-                double density = st.haze / 2200.0 * (1 + 3 * overcast) * height;
-                double fogAmt = 1 - Math.exp(-surfDist * density);
-                double hy = Math.max(d[1], Atmosphere.HAZE_ELEVATION), hl = Math.sqrt(1 - hy * hy), dh = Math.hypot(d[0], d[2]);
-                sky.radiance(dh > 1e-6 ? d[0] / dh * hl : hl, hy, dh > 1e-6 ? d[2] / dh * hl : 0, false, haze);
-                for (int k = 0; k < 3; k++) c[k] += (haze[k] - c[k]) * fogAmt;
-                // Border fog: the end of the loaded world blends into the sky.
-                double border = smoothstep(renderDistance * 0.7, renderDistance * 0.99, surfDist);
-                if (border > 0) {
-                    sky.radiance(d[0], d[1], d[2], false, haze);
-                    for (int k = 0; k < 3; k++) c[k] += (haze[k] - c[k]) * border;
-                }
+                applyHaze(c, d, surfDist, cam, sky, st, overcast, fadeEnd, haze);
 
                 double cover = bg / (double) samples;
                 for (int k = 0; k < 3; k++) c[k] += (s[k] - c[k]) * cover;
                 store(hr, hg, hb, i, c);
-                surface[i] = cover < 0.5;
+                surface[i] = cover < 0.5 || lodBg;
             }
         }
 
         finish(px, hr, hg, hb, surface, meter, w, h, st);
+    }
+
+    /**
+     * Aerial perspective: distant surfaces fade into the light of the atmosphere in front of them, and near
+     * {@code fadeEnd} (the end of what's loaded) into the sky itself.
+     */
+    private static void applyHaze(double[] c, double[] d, double surfDist, Vector3d cam, Sky sky,
+                                  DailyCamsConfig.RealisticSettings st, double overcast, double fadeEnd, double[] haze) {
+        double py = cam.y + d[1] * surfDist;
+        double height = Math.exp(-Math.max(0, (py + cam.y) * 0.5 - 64) / 140);
+        double density = st.haze / 2200.0 * (1 + 3 * overcast) * height;
+        double fogAmt = 1 - Math.exp(-surfDist * density);
+        double hy = Math.max(d[1], Atmosphere.HAZE_ELEVATION), hl = Math.sqrt(1 - hy * hy), dh = Math.hypot(d[0], d[2]);
+        sky.radiance(dh > 1e-6 ? d[0] / dh * hl : hl, hy, dh > 1e-6 ? d[2] / dh * hl : 0, false, haze);
+        for (int k = 0; k < 3; k++) c[k] += (haze[k] - c[k]) * fogAmt;
+        double border = smoothstep(fadeEnd * 0.7, fadeEnd * 0.99, surfDist);
+        if (border > 0) {
+            sky.radiance(d[0], d[1], d[2], false, haze);
+            for (int k = 0; k < 3; k++) c[k] += (haze[k] - c[k]) * border;
+        }
+    }
+
+    /**
+     * Distant (LOD) terrain: sunlight with shadows traced over the height map, sky light, and water over the ground
+     * beneath it. Writes the hazed radiance to {@code out} and returns the brightness before haze (for metering).
+     */
+    private static double shadeLod(LodTerrain lod, LodTerrain.Hit hit, LodTerrain.Hit shadowHit, double[] d, Vector3d cam,
+                                   Atmosphere atm, Sky sky, DailyCamsConfig.RealisticSettings st, double lx, double ly,
+                                   double lz, double[] lightIrr, double lightUp, double overcast, double fadeEnd,
+                                   double[] amb, double[] haze, double[] behind, double[] out) {
+        int i = hit.index;
+        double t = hit.t;
+        double px = cam.x + d[0] * t, py = cam.y + d[1] * t, pz = cam.z + d[2] * t;
+        double floorLight = Math.PI * (st.minLight + 0.1 * sky.dimensionLight);
+        if ((lod.flags[i] & LodTerrain.WATER) != 0 && hit.ny > 0.5) {
+            int fc = lod.floorColor[i];
+            double[] alb = {toLinear(((fc >> 16) & 255) / 255.0), toLinear(((fc >> 8) & 255) / 255.0), toLinear((fc & 255) / 255.0)};
+            atm.ambient(0, 1, 0, amb);
+            for (int k = 0; k < 3; k++) {
+                behind[k] = alb[k] / Math.PI * (amb[k] * SHADE + lightIrr[k] * Math.max(0, ly) * lightUp + floorLight);
+            }
+            double depth = (lod.height[i] - lod.floor[i]) / Math.max(0.05, -d[1]);
+            shadeWater(lod.color[i] | 0xB0000000, 1.0, d, px, pz, 0, 1, 0, depth, behind, atm, sky, st, out);
+        } else {
+            double nx = hit.nx, ny = hit.ny, nz = hit.nz;
+            double ndl = nx * lx + ny * ly + nz * lz;
+            boolean foliage = (lod.flags[i] & LodTerrain.FOLIAGE) != 0;
+            double diffuse = foliage ? Math.max(0, (ndl + 0.35) / 1.35) : Math.max(0, ndl);
+            double shadow = 0;
+            if (diffuse > 0 && lightUp > 0) {
+                shadow = lod.trace(px + nx * 0.05, py + ny * 0.05 + 0.02, pz + nz * 0.05, lx, ly, lz, 0.02, 600, shadowHit) ? 0 : 1;
+            }
+            double direct = diffuse * shadow * lightUp * sky.cloudShadow(px, py, pz);
+            atm.ambient(nx, ny, nz, amb);
+            double skyVis = (ny > 0.5 ? 1.0 : 0.7) * SHADE;
+            int col = lod.color[i];
+            double[] alb = {toLinear(((col >> 16) & 255) / 255.0), toLinear(((col >> 8) & 255) / 255.0), toLinear((col & 255) / 255.0)};
+            for (int k = 0; k < 3; k++) {
+                out[k] = alb[k] / Math.PI * (amb[k] * skyVis + lightIrr[k] * direct + FLOOR_TINT[k] * floorLight);
+            }
+        }
+        double lum = 0.2126 * out[0] + 0.7152 * out[1] + 0.0722 * out[2];
+        applyHaze(out, d, t, cam, sky, st, overcast, fadeEnd, haze);
+        return lum;
     }
 
     /** Direct light, sky light, block light and a light floor on an opaque surface. */
@@ -229,7 +312,7 @@ final class RealisticShader {
         double direct = diffuse * shadow * lightUp * (skyL > 0.01 ? sky.cloudShadow(ox, oy, oz) : 0);
         double back = foliage ? Math.max(0, -ndl) * 0.3 * shadow * lightUp : 0;
         double torch = 2.2 * Math.pow(blockL, 3.2);
-        double floor = Math.PI * st.minLight;
+        double floor = Math.PI * (st.minLight + 0.1 * sky.dimensionLight);
         double emission = state.getLightEmission() / 15.0;
         // Light sources glow (and bloom), less so seen through water or glass.
         double glow = emission > 0 ? (covered ? 0.15 : 0.7) * emission * emission : 0;
@@ -242,7 +325,8 @@ final class RealisticShader {
     }
 
     /** Reflection of the sky (Fresnel), sun glint and light absorbed by the water body. */
-    private static void shadeWater(GBuffer gb, int i, double[] d, double wx, double wz, double nx, double ny, double nz,
+    /** {@code tintArgb}: the water's colour as drawn (texture and biome tint); {@code skyLight}: 0-1 at the surface. */
+    private static void shadeWater(int tintArgb, double skyLight, double[] d, double wx, double wz, double nx, double ny, double nz,
                                    double depthBelow, double[] behind, Atmosphere atm, Sky sky,
                                    DailyCamsConfig.RealisticSettings st, double[] out) {
         if (ny > 0.5) {
@@ -261,12 +345,11 @@ final class RealisticShader {
         double rl = Math.sqrt(rx * rx + ry * ry + rz * rz);
         double[] refl = new double[3];
         sky.radiance(rx / rl, ry / rl, rz / rl, true, refl);
-        int lp = gb.tLight[i];
-        double skyVis = Math.pow(GBuffer.sky(lp), 2);
+        double skyVis = Math.pow(skyLight, 2);
         double[] up = new double[3];
         atm.ambient(0, 1, 0, up);
 
-        int ta = gb.tAlbedo[i];
+        int ta = tintArgb;
         double tr = toLinear(((ta >> 16) & 255) / 255.0), tg = toLinear(((ta >> 8) & 255) / 255.0), tb = toLinear((ta & 255) / 255.0);
         double sunUp = Math.max(0, atm.sy), moonUp = Math.max(0, atm.my);
         double[] scatter = new double[3], tint = {tr, tg, tb};
@@ -567,7 +650,16 @@ final class RealisticShader {
          * every cloud near the horizon would tint the haze along its whole compass direction, which shows up as
          * streaks converging above the horizon.
          */
+        /** Background colour for dimensions without a sky, instead of the atmosphere (null = normal sky). */
+        double[] flat;
+        /** The dimension's own faint light (the Nether has some, the overworld none). */
+        double dimensionLight;
+
         void radiance(double dx, double dy, double dz, boolean full, double[] out) {
+            if (flat != null) {
+                out[0] = flat[0]; out[1] = flat[1]; out[2] = flat[2];
+                return;
+            }
             atm.sky(dx, dy, dz, out);
             if (full) {
                 double cs = dx * atm.sx + dy * atm.sy + dz * atm.sz;

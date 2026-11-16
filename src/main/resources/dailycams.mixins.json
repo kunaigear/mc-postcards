@@ -6,6 +6,7 @@
     "ChunkMeshCacheMixin",
     "ChunkMeshCacheInvoker",
     "ChunkMeshInvoker",
+    "ChunkMapInvoker",
     "SoftwareRenderPipelineMixin",
     "SoftwareRasterizerMixin",
     "WorldRendererMixin"

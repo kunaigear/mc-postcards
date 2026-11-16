@@ -44,6 +44,7 @@ Every post is an embed with the picture, the camera name, its coordinates and di
 | `width`, `height` | `1920`, `1080` | Picture size. |
 | `fov` | `70` | Default field of view in degrees. Cameras can override it with `/dailycam fov`; with the client helper, new placements use the player's FOV. |
 | `renderDistance` | `16` | View distance in chunks (2–32), like Minecraft's own setting. See [Performance](performance.md#render-distance). |
+| `lodDistance` | `64` | How far [distant terrain](distant-terrain.md) reaches, in chunks. `0` turns it off. |
 | `ssaa` | `2` | Supersampling factor for smoother edges (1 = off). |
 | `shader` | `"simple"` | `simple`, `realistic` or `none`. See [Shaders](shader.md). |
 | `shaderSettings` | | Settings of the simple shader. See [Shaders](shader.md#settings-1). |
