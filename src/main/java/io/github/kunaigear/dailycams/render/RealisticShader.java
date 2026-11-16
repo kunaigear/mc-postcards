@@ -29,7 +29,7 @@ import java.awt.image.DataBufferInt;
  * <ul>
  *   <li>a physically based sky ({@link Atmosphere}) with sun, moon, stars and procedural clouds that change daily,</li>
  *   <li>sunlight coloured by the atmosphere, with soft voxel shadows, cloud shadows and light through leaves,</li>
- *   <li>leaves that glow when backlit, with a sheen; plants lit like the ground they grow on,</li>
+ *   <li>leaves that glow when backlit, with a sheen and relief up close; plants lit like the ground they grow on,</li>
  *   <li>sky light from the actual sky colour, weakened by screen-space ambient occlusion, warm block light and a
  *   light floor, so nothing is pitch black,</li>
  *   <li>water with sky reflections, sun glints and depth-based absorption,</li>
@@ -41,6 +41,8 @@ final class RealisticShader {
     private RealisticShader() {}
 
     private static final int MAX_SHADOW_STEPS = 200;
+    /** How strongly the relief of leaf textures bends their normals. */
+    private static final double RELIEF = 6;
     /** Reach (blocks) and samples of the screen-space ambient occlusion. */
     private static final double AO_RADIUS = 3.5;
     private static final int AO_SAMPLES = 8;
@@ -268,10 +270,15 @@ final class RealisticShader {
                     }
                     double ox = cam.x + d[0] * dist[i], oy = cam.y + d[1] * dist[i], oz = cam.z + d[2] * dist[i];
                     surfAlb[0] = toLinear(ar); surfAlb[1] = toLinear(ag); surfAlb[2] = toLinear(ab);
-                    if (texels.footprint(gb.normal[i], d, dist[i]) > 1 && texels.locate(ox, oy, oz)) texels.filter(surfAlb);
-                    double sun = shadow[i];
+                    double cavity = 1;
+                    if ((texels.footprint(gb.normal[i], d, dist[i]) > 1 || mat[i] == LEAVES) && texels.locate(ox, oy, oz)) {
+                        texels.filter(surfAlb);
+                        if (mat[i] == LEAVES) cavity = texels.relief();
+                    }
+                    // The gaps between leaves are shaded by the leaves around them.
+                    double sun = shadow[i] * (0.7 + 0.3 * cavity);
                     if (water && sun > 0) sun *= caustics(ox, oz, wy - oy, lx, ly, lz);
-                    shadeOpaque(gb, i, mat[i], texels.normal, occlusion[i], d, ox, oy, oz, surfAlb[0], surfAlb[1],
+                    shadeOpaque(gb, i, mat[i], texels.normal, Math.min(occlusion[i], 0.5 + 0.5 * cavity), d, ox, oy, oz, surfAlb[0], surfAlb[1],
                             surfAlb[2], sun, atm, sky, st, blocks, cursor, lx, ly, lz, lightIrr, lightUp, translucent, amb, opq);
                     surfDist = dist[i];
                 } else {
@@ -618,11 +625,11 @@ final class RealisticShader {
     }
 
     /**
-     * The block face texel each pixel shows, from the {@link LodBlocks} pictures, for textures without flicker in
-     * the distance. Camera Obscura samples textures without mipmaps, so where a pixel
+     * The block face texel each pixel shows, from the {@link LodBlocks} pictures, for two things Camera Obscura
+     * doesn't do. Textures without flicker in the distance: it samples textures without mipmaps, so where a pixel
      * covers several texels it shows one of them more or less at random, and distant leaves and grass sparkle. There,
      * the albedo is blended towards the face's averaged texture, tinted with the biome colour Camera Obscura uses for
-     * that block.
+     * that block. And relief on leaves up close ({@link LodBlocks#relief}).
      */
     static final class Texels {
         private final ChunkMeshCache.FastBlockGetter blocks;
@@ -682,6 +689,26 @@ final class RealisticShader {
             LodBlocks.sample(baked, face, a, b, Math.log(footprint) / Math.log(2), baked.tint == LodBlocks.Tint.NONE ? white : tint, avg);
             if (avg[0] + avg[1] + avg[2] <= 0) return;
             for (int c = 0; c < 3; c++) alb[c] += (avg[c] - alb[c]) * k;
+        }
+
+        /**
+         * Bends {@link #normal} by the slope of the leaf texel's relief, and returns how far out of the gaps the
+         * texel lies (1 = on top). Fades out where a pixel covers more than about a texel, where it would only add
+         * noise.
+         */
+        double relief() {
+            float[] r = baked.relief[face];
+            double fade = 1 - smoothstep(0.6, 1.5, footprint);
+            if (r == null || fade <= 0) return 1;
+            int t = (Math.min(LodBlocks.RES - 1, (int) (b * LodBlocks.RES)) * LodBlocks.RES + Math.min(LodBlocks.RES - 1, (int) (a * LodBlocks.RES))) * 3;
+            double sa = r[t] * RELIEF * fade, sb = r[t + 1] * RELIEF * fade;
+            // The picture's axes: X faces show (z, y), Y faces (x, z), Z faces (x, y).
+            int axisA = face < 2 ? 2 : 0, axisB = face >= 2 && face < 4 ? 2 : 1;
+            normal[axisA] -= sa;
+            normal[axisB] -= sb;
+            double l = Math.sqrt(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
+            normal[0] /= l; normal[1] /= l; normal[2] /= l;
+            return 1 - fade * (1 - Math.clamp(r[t + 2] * 1.2, 0, 1));
         }
     }
 
