@@ -29,7 +29,7 @@ final class CameraRenderer {
 
     /** {@code renderDistance} is in blocks. {@code cpuShare} limits how much of one core the render may use. */
     record Settings(int width, int height, int fov, int renderDistance, int ssaa, double cpuShare,
-                    @Nullable DailyCamsConfig.ShaderSettings shader) {}
+                    String shader, DailyCamsConfig.ShaderSettings simple, DailyCamsConfig.RealisticSettings realistic) {}
 
     /** Chunk radius Camera Obscura looks at for a given view distance (mirrors WorldRenderer). */
     static int chunkRadius(int renderDistance) {
@@ -91,13 +91,23 @@ final class CameraRenderer {
                 renderer.entity = hidden;
                 // Every mesh is pinned and clean, so this only reads the sky/fog/sun values for the frame.
                 renderer.updateChunksInRange(level, false);
-                BufferedImage image = renderer.render();
+                boolean realistic = "realistic".equals(s.shader());
+                // The realistic shader relights the frame, so it records what each pixel shows while drawing.
+                GBuffer gbuffer = realistic ? new GBuffer(s.width(), s.height(), s.ssaa(), s.width() * s.ssaa()) : null;
+                BufferedImage image;
+                if (gbuffer != null) gbuffer.activate();
+                try {
+                    image = renderer.render();
+                } finally {
+                    GBuffer.deactivate();
+                }
                 long drawMs = (System.nanoTime() - drawStart) / 1_000_000;
                 long shadeMs = 0;
-                if (s.shader() != null) {
+                if (!"none".equals(s.shader())) {
                     stage = "shading";
                     long shadeStart = System.nanoTime();
-                    SimpleShader.apply(image, renderer.frame(), level, s.shader());
+                    if (gbuffer != null) RealisticShader.apply(image, renderer.frame(), gbuffer, level, s.realistic());
+                    else SimpleShader.apply(image, renderer.frame(), level, s.simple());
                     shadeMs = (System.nanoTime() - shadeStart) / 1_000_000;
                 }
                 DailyCams.LOGGER.info("Built {} chunk sections in {} ms, drew the frame in {} ms, shader {} ms ({} ms in total spent yielding to the server)",

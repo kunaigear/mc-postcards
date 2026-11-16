@@ -46,9 +46,40 @@ public final class DailyCamsConfig {
      */
     public double renderCpuShare = 0.25;
 
-    /** "simple" (sun shadows, warm light, haze, bloom, colour grade) or "none" (plain Camera Obscura output). */
+    /**
+     * "simple" (sun shadows, warm light, haze, bloom, colour grade), "realistic" (relit from scratch: physical sky,
+     * soft shadows, water reflections, filmic tone mapping) or "none" (plain Camera Obscura output).
+     */
     public String shader = "simple";
     public ShaderSettings shaderSettings = new ShaderSettings();
+    public RealisticSettings realisticSettings = new RealisticSettings();
+
+    public static final java.util.Set<String> SHADERS = java.util.Set.of("simple", "realistic", "none");
+
+    /** Knobs for the "realistic" shader. */
+    public static final class RealisticSettings {
+        /** Brightness on top of the automatic exposure (1 = as measured). */
+        public double exposure = 1.0;
+        /** How far the automatic exposure may brighten dark scenes such as nights and caves. */
+        public double maxExposure = 40;
+        /** Light that is always there, so places without any light are not pitch black. */
+        public double minLight = 0.012;
+        /** Haze over distant terrain (1 = natural). */
+        public double haze = 1.0;
+        /** Cloud cover (0 = clear skies, 1 = varies naturally from day to day, 2 = mostly cloudy). */
+        public double clouds = 1.0;
+        /** Width of shadow edges (0 = hard). */
+        public double shadowSoftness = 1.0;
+        /** Glow around bright areas such as the sun and light sources. */
+        public double bloom = 0.06;
+        public double saturation = 1.15;
+        /** Filmic contrast (1 = neutral). */
+        public double contrast = 1.12;
+        /** Darkening towards the corners. */
+        public double vignette = 0.12;
+        /** Strength of reflections on water (1 = physically based). */
+        public double waterReflections = 1.0;
+    }
 
     /** Knobs for the "simple" shader. */
     public static final class ShaderSettings {
@@ -150,7 +181,7 @@ public final class DailyCamsConfig {
         if (!imageFormat.equals("png") && !imageFormat.equals("jpg")) imageFormat = "jpg";
 
         shader = shader == null ? "simple" : shader.toLowerCase(Locale.ROOT);
-        if (!shader.equals("simple") && !shader.equals("none")) {
+        if (!SHADERS.contains(shader)) {
             DailyCams.LOGGER.warn("Unknown shader '{}', using 'simple'", shader);
             shader = "simple";
         }
@@ -163,6 +194,19 @@ public final class DailyCamsConfig {
         ss.saturation = Mth.clamp(ss.saturation, 0, 2);
         ss.contrast = Mth.clamp(ss.contrast, 0.5, 2);
         ss.vignette = Mth.clamp(ss.vignette, 0, 1);
+        if (realisticSettings == null) realisticSettings = new RealisticSettings();
+        RealisticSettings rs = realisticSettings;
+        rs.exposure = Mth.clamp(rs.exposure, 0.1, 10);
+        rs.maxExposure = Mth.clamp(rs.maxExposure, 1, 200);
+        rs.minLight = Mth.clamp(rs.minLight, 0, 0.5);
+        rs.haze = Mth.clamp(rs.haze, 0, 5);
+        rs.clouds = Mth.clamp(rs.clouds, 0, 2);
+        rs.shadowSoftness = Mth.clamp(rs.shadowSoftness, 0, 4);
+        rs.bloom = Mth.clamp(rs.bloom, 0, 1);
+        rs.saturation = Mth.clamp(rs.saturation, 0, 2);
+        rs.contrast = Mth.clamp(rs.contrast, 0.5, 2);
+        rs.vignette = Mth.clamp(rs.vignette, 0, 1);
+        rs.waterReflections = Mth.clamp(rs.waterReflections, 0, 2);
 
         if (scheduleTimes == null) scheduleTimes = new ArrayList<>();
         List<LocalTime> times = new ArrayList<>();

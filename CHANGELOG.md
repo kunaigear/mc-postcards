@@ -2,6 +2,7 @@
 A server-side Minecraft Fabric mod: players place virtual cameras with `/dailycam set`, and every day the server renders what each camera sees and posts the picture to a Discord webhook.
 
 ## Changes
+- New `realistic` shader in the style of Photon: a physically based sky with clouds that change daily, sunlight coloured by the atmosphere, soft shadows, light through leaves, water reflections, haze, automatic exposure and filmic (AgX) colour. Nights and caves stay visible. Choose it with `"shader": "realistic"` or `/dailycam shader realistic [name]`; tune it with `realisticSettings`. It takes about 10 s more per camera than the simple shader
 - The client helper reads which `/dailycam set` options the server supports and only adds those, so it now works on older servers too (on a 1.2.0 server it no longer causes "Incorrect argument")
 - A `config.json` or `cameras.json` with an error is backed up as `<file>.broken-<date>` and no longer overwritten; `/dailycam reload` shows the error and keeps the previous settings and cameras
 - A daily run interrupted by a stop or crash is finished after the restart

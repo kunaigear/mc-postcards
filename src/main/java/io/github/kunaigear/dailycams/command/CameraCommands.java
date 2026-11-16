@@ -134,6 +134,8 @@ public final class CameraCommands {
                 .then(Commands.literal("shader")
                         .then(optionalName(Commands.literal("simple"), CameraCommands::suggestManageable,
                                 (ctx, cam) -> setShader(ctx, cam, "simple"), true))
+                        .then(optionalName(Commands.literal("realistic"), CameraCommands::suggestManageable,
+                                (ctx, cam) -> setShader(ctx, cam, "realistic"), true))
                         .then(optionalName(Commands.literal("none"), CameraCommands::suggestManageable,
                                 (ctx, cam) -> setShader(ctx, cam, "none"), true))
                         .then(optionalName(Commands.literal("default"), CameraCommands::suggestManageable,
@@ -491,7 +493,7 @@ public final class CameraCommands {
         out.append(Component.literal("\n  /dailycam list | status").withStyle(ChatFormatting.YELLOW))
            .append(Component.literal("\n  /dailycam test | info | remove [name]").withStyle(ChatFormatting.YELLOW))
            .append(Component.literal("\n  /dailycam fov <30-110|default> [name]").withStyle(ChatFormatting.YELLOW))
-           .append(Component.literal("\n  /dailycam shader <simple|none|default> [name]").withStyle(ChatFormatting.YELLOW));
+           .append(Component.literal("\n  /dailycam shader <simple|realistic|none|default> [name]").withStyle(ChatFormatting.YELLOW));
         if (isAdmin(src)) {
             out.append(Component.literal("\n  /dailycam webhook <name> <url|default> | runall | reload").withStyle(ChatFormatting.RED));
         }

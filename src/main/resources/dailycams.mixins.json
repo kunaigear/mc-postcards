@@ -6,7 +6,9 @@
     "ChunkMeshCacheMixin",
     "ChunkMeshCacheInvoker",
     "ChunkMeshInvoker",
-    "SoftwareRenderPipelineMixin"
+    "SoftwareRenderPipelineMixin",
+    "SoftwareRasterizerMixin",
+    "WorldRendererMixin"
   ],
   "server": [
     "DedicatedServerMixin"

@@ -45,8 +45,9 @@ Every post is an embed with the picture, the camera name, its coordinates and di
 | `fov` | `70` | Default field of view in degrees. Cameras can override it with `/dailycam fov`; with the client helper, new placements use the player's FOV. |
 | `renderDistance` | `16` | View distance in chunks (2–32), like Minecraft's own setting. See [Performance](performance.md#render-distance). |
 | `ssaa` | `2` | Supersampling factor for smoother edges (1 = off). |
-| `shader` | `"simple"` | `simple` or `none`. See [Shader](shader.md). |
-| `shaderSettings` | | Strength of each shader effect. See [Shader](shader.md#settings). |
+| `shader` | `"simple"` | `simple`, `realistic` or `none`. See [Shaders](shader.md). |
+| `shaderSettings` | | Settings of the simple shader. See [Shaders](shader.md#settings-1). |
+| `realisticSettings` | | Settings of the realistic shader (exposure, night brightness, clouds…). See [Shaders](shader.md#settings). |
 | `renderCpuShare` | `0.25` | How much of one CPU core a render may use (0.05–1.0). See [Performance](performance.md). |
 | `imageFormat` | `"jpg"` | `jpg` or `png`. JPEGs keep full colour resolution (4:4:4), so block edges stay crisp. At 1080p a JPEG is usually 0.6–1 MB, a PNG 3–4 MB. |
 | `jpegQuality` | `0.9` | JPEG quality (0.1–1.0). |

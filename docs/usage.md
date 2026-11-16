@@ -42,7 +42,7 @@ permission API, so LuckPerms and similar mods can grant these nodes instead of o
 | `/dailycam test [name]` | owner / admin | Renders and sends a camera right away. Non-admins have a cooldown (5 minutes by default). |
 | `/dailycam remove [name]` | owner / admin | Deletes a camera. |
 | `/dailycam fov <30-110\|default> [name]` | owner / admin | Sets a camera's field of view. |
-| `/dailycam shader <simple\|none\|default> [name]` | owner / admin | Turns the [shader](shader.md) on or off for one camera. |
+| `/dailycam shader <simple\|realistic\|none\|default> [name]` | owner / admin | Picks the [shader](shader.md) for one camera. |
 | `/dailycam webhook <name> <url\|default>` | admin | Sends one camera to a different webhook. |
 | `/dailycam runall` | admin | Renders and sends every camera now. |
 | `/dailycam reload` | admin | Reloads the config and `cameras.json`. |

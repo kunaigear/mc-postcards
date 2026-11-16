@@ -150,7 +150,8 @@ public final class RenderQueue {
             CameraSpec cam = request.camera;
             this.settings = new CameraRenderer.Settings(cfg.width, cfg.height,
                     cam.fov != null ? cam.fov : cfg.fov, cfg.renderDistanceBlocks(), cfg.ssaa, cfg.renderCpuShare,
-                    "simple".equals(cam.shader != null ? cam.shader : cfg.shader) ? cfg.shaderSettings : null);
+                    cam.shader != null && DailyCamsConfig.SHADERS.contains(cam.shader) ? cam.shader : cfg.shader,
+                    cfg.shaderSettings, cfg.realisticSettings);
             // Only the chunks the camera can actually see (plus a margin), nearest first.
             this.toLoad = new ViewVolume(level, cam.x, cam.y, cam.z, cam.yaw, cam.pitch, settings).columnsToLoad();
             this.lastProgressTick = tick;
