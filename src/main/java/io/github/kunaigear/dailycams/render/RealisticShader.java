@@ -26,6 +26,7 @@ import java.awt.image.DataBufferInt;
  * <ul>
  *   <li>a physically based sky ({@link Atmosphere}) with sun, moon, stars and procedural clouds that change daily,</li>
  *   <li>sunlight coloured by the atmosphere, with soft voxel shadows, cloud shadows and light through leaves,</li>
+ *   <li>leaves that glow when backlit, with a sheen; plants lit like the ground they grow on,</li>
  *   <li>sky light from the actual sky colour, warm block light and a light floor, so nothing is pitch black,</li>
  *   <li>water with sky reflections, sun glints and depth-based absorption,</li>
  *   <li>aerial perspective, automatic exposure, bloom and AgX filmic tone mapping.</li>
@@ -36,6 +37,8 @@ final class RealisticShader {
     private RealisticShader() {}
 
     private static final int MAX_SHADOW_STEPS = 200;
+    /** Light that gets through one leaf block. */
+    private static final double LEAF_TRANSMITTANCE = 0.5;
     /** The layer of cumulus clouds, in blocks above sea level. */
     private static final double CLOUD_BOTTOM = 900, CLOUD_TOP = 1500;
     private static final double[] TORCH = {1.0, 0.56, 0.26};
@@ -466,9 +469,22 @@ final class RealisticShader {
         double skyVis = Math.pow(skyL, 2.4) * SHADE;
         atm.ambient(nx, ny, nz, amb);
         double ndl = nx * lx + ny * ly + nz * lz;
-        double diffuse = material != SOLID ? Math.max(0, (ndl + 0.35) / 1.35) : Math.max(0, ndl);
-        double direct = diffuse * shadow * lightUp * (skyL > 0.01 ? sky.cloudShadow(ox, oy, oz) : 0);
-        double back = material != SOLID ? Math.max(0, -ndl) * 0.3 * shadow * lightUp : 0;
+        double lit = lightUp * (skyL > 0.01 ? sky.cloudShadow(ox, oy, oz) : 0), sun = shadow * lit;
+        // A leaf block is a cloud of small leaves facing every way, so it's lit from any side the light reaches it.
+        double diffuse = material == LEAVES ? 0.3 + 0.7 * Math.max(0, ndl) : Math.max(0, ndl);
+        double direct = diffuse * sun;
+        // Light coming through leaves and blades towards the eye: mostly forward, so strongest looking into the sun.
+        double through = 0, sheen = 0;
+        if (material != SOLID && sun > 0) {
+            double mu = d[0] * lx + d[1] * ly + d[2] * lz;
+            through = lit * (material == LEAVES ? 0.4 : 0.15) * (0.3 + 0.7 * Math.max(0, -ndl)) * Sky.hg(mu, 0.4);
+            if (material == LEAVES && ndl > 0) {
+                // Seen edge-on, the leaves in front hide each other's highlights.
+                double ndv = -(nx * d[0] + ny * d[1] + nz * d[2]);
+                sheen = sun * 0.12 * smoothstep(0.1, 0.5, ndv) * ggx(d, nx, ny, nz, lx, ly, lz, 0.45, 0.04);
+            }
+        }
+        double lum = Math.max(1e-4, 0.2126 * ar + 0.7152 * ag + 0.0722 * ab);
         double torch = 2.2 * Math.pow(blockL, 3.2);
         double floor = Math.PI * (st.minLight + 0.1 * sky.dimensionLight);
         // Light sources glow (and bloom), less so seen through water or glass.
@@ -476,9 +492,29 @@ final class RealisticShader {
 
         double[] alb = {ar, ag, ab};
         for (int k = 0; k < 3; k++) {
-            double e = amb[k] * skyVis * ao + lightIrr[k] * (direct + back) + TORCH[k] * torch * ao + FLOOR_TINT[k] * floor * ao;
-            out[k] = alb[k] / Math.PI * e + alb[k] * glow;
+            // What comes through leaves has been coloured by them on the way: more saturated than what they reflect,
+            // and the colour they let through (green) gets deeper into a canopy than the light that reaches it directly.
+            double tint = Math.min(2, Math.sqrt(alb[k] / lum));
+            double e = amb[k] * skyVis * ao + lightIrr[k] * (direct + through * tint * Math.pow(shadow, 1 - 0.6 * Math.min(1, tint)))
+                    + TORCH[k] * torch * ao + FLOOR_TINT[k] * floor * ao;
+            out[k] = alb[k] / Math.PI * e + alb[k] * glow + lightIrr[k] * sheen;
         }
+    }
+
+    /** GGX specular reflection (Smith visibility, Schlick Fresnel) of a light, times n·l. */
+    private static double ggx(double[] d, double nx, double ny, double nz, double lx, double ly, double lz,
+                              double roughness, double f0) {
+        double hx = lx - d[0], hy = ly - d[1], hz = lz - d[2], hl = Math.sqrt(hx * hx + hy * hy + hz * hz);
+        if (hl < 1e-6) return 0;
+        hx /= hl; hy /= hl; hz /= hl;
+        double ndl = Math.max(0, nx * lx + ny * ly + nz * lz), ndv = Math.max(1e-3, -(nx * d[0] + ny * d[1] + nz * d[2]));
+        double ndh = Math.max(0, nx * hx + ny * hy + nz * hz), vdh = Math.max(0, lx * hx + ly * hy + lz * hz);
+        double a2 = roughness * roughness * roughness * roughness;
+        double q = ndh * ndh * (a2 - 1) + 1;
+        double dist = a2 / (Math.PI * q * q);
+        double vis = 0.5 / (ndl * Math.sqrt(ndv * ndv * (1 - a2) + a2) + ndv * Math.sqrt(ndl * ndl * (1 - a2) + a2) + 1e-6);
+        double fresnel = f0 + (1 - f0) * Math.pow(1 - vdh, 5);
+        return dist * vis * fresnel * ndl;
     }
 
     /**
@@ -651,7 +687,10 @@ final class RealisticShader {
                 || state.is(BlockTags.CROPS) ? PLANT : SOLID;
     }
 
-    /** Fraction of light reaching a point (voxel walk; leaves let some light through). */
+    /**
+     * Fraction of light reaching a point (voxel walk; leaves let some light through). A point inside a leaf block
+     * (an inner face, seen through the gaps of the leaves) gets the light through that block too.
+     */
     private static double transmittanceToLight(ChunkMeshCache.FastBlockGetter blocks, BlockPos.MutableBlockPos cursor,
                                                double ox, double oy, double oz, double dx, double dy, double dz, int maxY) {
         int x = Mth.floor(ox), y = Mth.floor(oy), z = Mth.floor(oz);
@@ -662,7 +701,7 @@ final class RealisticShader {
         double tMaxX = dx == 0 ? Double.POSITIVE_INFINITY : ((dx > 0 ? x + 1 - ox : ox - x) * tDeltaX);
         double tMaxY = dy == 0 ? Double.POSITIVE_INFINITY : ((dy > 0 ? y + 1 - oy : oy - y) * tDeltaY);
         double tMaxZ = dz == 0 ? Double.POSITIVE_INFINITY : ((dz > 0 ? z + 1 - oz : oz - z) * tDeltaZ);
-        double t = 1;
+        double t = blocks.getBlockState(cursor.set(x, y, z)).getBlock() instanceof LeavesBlock ? LEAF_TRANSMITTANCE : 1;
         for (int i = 0; i < MAX_SHADOW_STEPS; i++) {
             if (tMaxX < tMaxY && tMaxX < tMaxZ) { x += stepX; tMaxX += tDeltaX; }
             else if (tMaxY < tMaxZ) { y += stepY; tMaxY += tDeltaY; }
@@ -671,7 +710,7 @@ final class RealisticShader {
             BlockState state = blocks.getBlockState(cursor.set(x, y, z));
             if (state.isAir()) continue;
             if (state.getBlock() instanceof LeavesBlock) {
-                t *= 0.42;
+                t *= LEAF_TRANSMITTANCE;
                 if (t < 0.04) return 0;
             } else if (state.canOcclude()) {
                 return 0;
