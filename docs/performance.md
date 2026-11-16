@@ -53,6 +53,22 @@ than 100 ms late (two missed ticks), which players can notice.
   faster).
 - Each render logs how long it spent building, drawing and shading, and how long it waited for the server.
 
+### Shaders
+
+The same host and mobs, with the default settings (distant terrain out to 64 chunks, 1080p JPEG), rendering the
+village from [the documentation pictures](development.md#documentation-pictures) twice with each shader, over
+terrain that was already generated:
+
+| Shader | Time per camera | Of that, shading | Hitches | Worst second | Longest GC pause |
+|---|---|---|---|---|---|
+| `none` | 121–123 s | 1 s | 0 | 20 TPS | 55 ms |
+| `simple` | 128–129 s | 8–9 s | 0 | 20 TPS | 63 ms |
+| `realistic` | 149–152 s | 25–26 s | 0 | 20 TPS | 58 ms |
+
+The realistic shader also takes about 4 s longer to draw the frame, for the leaves that stick out of their blocks.
+Most of the time goes into building geometry for the chunks in view: about 103 s with every shader. The idle
+server had no hitches either on this machine.
+
 ## Render distance
 
 `renderDistance` is in chunks, like Minecraft's own setting. The default of 16 (256 blocks) shows the landscape

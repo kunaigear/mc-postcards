@@ -7,12 +7,16 @@ players don't need anything for them. They're unrelated to Iris shader packs on 
 
 | `"shader"` | Look | Extra time per camera (1080p, 2-core host) |
 |---|---|---|
-| `simple` (default) | Camera Obscura's picture with sun shadows, warm light, haze, bloom and a colour grade. | about 6 s |
-| `realistic` | Relit from scratch, in the style of shader packs like Photon: physical sky, volumetric clouds, soft shadows, sun rays, leaves that glow in the sun, reflections in water, filmic colour. | about 24 s |
+| `simple` (default) | Camera Obscura's picture with sun shadows, warm light, haze, bloom and a colour grade. | about 7 s |
+| `realistic` | Relit from scratch, in the style of shader packs like Photon: physical sky, volumetric clouds, soft shadows, sun rays, leaves that glow in the sun, reflections in water, filmic colour. | about 29 s |
 | `none` | Camera Obscura's plain picture. | – |
 
 Choose one for every camera with `"shader"` in the config, or for one camera with
 `/dailycam shader <simple|realistic|none> [name]`. `default` makes a camera follow the config again.
+
+![The same village at noon with each shader](images/shaders-noon.jpg)
+
+![The same village at sunset with each shader](images/shaders-sunset.jpg)
 
 ## Realistic
 
@@ -83,12 +87,10 @@ The realistic shader is tuned with `realisticSettings`:
 
 ### Cost
 
-On the 2-core test host, the realistic shader took 16 s for a 1080p picture, against 6 s for the simple one, under
-the same CPU limit as the rest of the render. TPS stayed at 20 and no tick took longer than 25 ms. The clouds,
-reflections and sun rays added since make it about a third slower, and the foliage lighting about 8% more (4.9 s,
-then 6.5 s, then about 7 s for the same 1080p view on a desktop CPU without a limit). The leaves sticking out of
-their blocks make drawing the frame about 1 s slower on that CPU (2.3 s to 3–3.8 s). Expect about 24 s on the test
-host. It needs about 170 MB of extra memory at 1080p, and about 4× that at 4K.
+On the [2-core test host](performance.md#measurements), with the default CPU limit, a 1080p picture of the village
+took 149–152 s with the realistic shader, against 128–129 s with the simple one and 121–123 s without a shader. The
+shading itself took about 25 s, and the leaves sticking out of their blocks made drawing the frame about 4 s slower.
+TPS stayed at 20 throughout. It needs about 170 MB of extra memory at 1080p, and about 4× that at 4K.
 
 The realistic shader replaces Camera Obscura's sky, clouds and fog with its own.
 
@@ -126,6 +128,6 @@ The simple shader is tuned with `shaderSettings`:
 
 ### Cost
 
-The simple shader adds 1–9 seconds per camera, depending on resolution and CPU. It runs in the background under
-the same CPU limit as the rest of the render, and in the [2-core test](performance.md) the shading phase caused no
-hitches.
+The simple shader adds about 7 s per 1080p camera on the 2-core test host, less on a faster CPU. It runs in the
+background under the same CPU limit as the rest of the render, and in the [2-core test](performance.md#measurements)
+the shading phase caused no hitches.
