@@ -1,6 +1,8 @@
 package io.github.kunaigear.dailycams.render;
 
 import io.github.kunaigear.dailycams.config.DailyCamsConfig;
+import io.github.kunaigear.dailycams.mixin.FastBlockGetterInvoker;
+import de.tomalbrc.cameraobscura.color.BlockColors;
 import de.tomalbrc.cameraobscura.renderer.ChunkMeshCache;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.BlockTags;
@@ -8,8 +10,12 @@ import net.minecraft.tags.FluidTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.attribute.EnvironmentAttributes;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.LeavesBlock;
+import net.minecraft.world.level.block.MultifaceBlock;
+import net.minecraft.world.level.block.VineBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4d;
 import org.joml.Vector3d;
@@ -23,7 +29,9 @@ import java.awt.image.DataBufferInt;
  * <ul>
  *   <li>a physically based sky ({@link Atmosphere}) with sun, moon, stars and procedural clouds that change daily,</li>
  *   <li>sunlight coloured by the atmosphere, with soft voxel shadows, cloud shadows and light through leaves,</li>
- *   <li>sky light from the actual sky colour, warm block light and a light floor, so nothing is pitch black,</li>
+ *   <li>leaves that glow when backlit, with a sheen and relief up close; plants lit like the ground they grow on,</li>
+ *   <li>sky light from the actual sky colour, weakened by screen-space ambient occlusion, warm block light and a
+ *   light floor, so nothing is pitch black,</li>
  *   <li>water with sky reflections, sun glints and depth-based absorption,</li>
  *   <li>aerial perspective, automatic exposure, bloom and AgX filmic tone mapping.</li>
  * </ul>
@@ -33,6 +41,13 @@ final class RealisticShader {
     private RealisticShader() {}
 
     private static final int MAX_SHADOW_STEPS = 200;
+    /** How strongly the relief of leaf textures bends their normals. */
+    private static final double RELIEF = 6;
+    /** Reach (blocks) and samples of the screen-space ambient occlusion. */
+    private static final double AO_RADIUS = 3.5;
+    private static final int AO_SAMPLES = 8;
+    /** Light that gets through one leaf block. */
+    private static final double LEAF_TRANSMITTANCE = 0.5;
     /** The layer of cumulus clouds, in blocks above sea level. */
     private static final double CLOUD_BOTTOM = 900, CLOUD_TOP = 1500;
     private static final double[] TORCH = {1.0, 0.56, 0.26};
@@ -91,6 +106,9 @@ final class RealisticShader {
 
         // Pass 1: positions and shadows for every opaque pixel.
         float[] dist = new float[n], shadow = new float[n], vdx = new float[n], vdy = new float[n], vdz = new float[n];
+        byte[] mat = new byte[n];
+        BlockState lastState = null;
+        int lastMat = SOLID;
         Vector3d tmp = new Vector3d();
         for (int y = 0; y < h; y++) {
             Throttle.checkpoint();
@@ -113,13 +131,16 @@ final class RealisticShader {
                 f.inverseViewProjection().transformProject(tmp);
                 double ox = tmp.x - cam.x, oy = tmp.y - cam.y, oz = tmp.z - cam.z;
                 dist[i] = (float) Math.sqrt(ox * ox + oy * oy + oz * oz);
-                if (lightUp <= 0 || GBuffer.sky(gb.light[i]) <= 0.01) continue;
                 int np = gb.normal[i];
                 double nx = GBuffer.nx(np), ny = GBuffer.ny(np), nz = GBuffer.nz(np);
                 if (nx * vdx[i] + ny * vdy[i] + nz * vdz[i] > 0) { nx = -nx; ny = -ny; nz = -nz; }
-                double ndl = nx * lx + ny * ly + nz * lz;
                 BlockState state = blocks.getBlockState(cursor.set(Mth.floor(tmp.x - nx * 0.02), Mth.floor(tmp.y - ny * 0.02), Mth.floor(tmp.z - nz * 0.02)));
-                if (ndl <= 0 && !isFoliage(state)) continue;
+                if (state.isAir()) state = leavesAround(blocks, cursor, tmp.x, tmp.y, tmp.z, state);
+                if (state != lastState) { lastState = state; lastMat = material(state); }
+                mat[i] = (byte) lastMat;
+                if (lightUp <= 0 || GBuffer.sky(gb.light[i]) <= 0.01) continue;
+                double ndl = nx * lx + ny * ly + nz * lz;
+                if (ndl <= 0 && lastMat == SOLID) continue;
                 shadow[i] = (float) transmittanceToLight(blocks, cursor, tmp.x + nx * 0.03, tmp.y + ny * 0.03, tmp.z + nz * 0.03, lx, ly, lz, maxY);
             }
         }
@@ -127,6 +148,7 @@ final class RealisticShader {
         // Pass 2: soften the shadows (depth-aware blur), so edges look like a real sun's penumbra.
         int radius = (int) Math.round(Math.max(1, w / 1300.0) * st.shadowSoftness);
         if (radius > 0) shadow = softenShadows(shadow, dist, w, h, radius);
+        float[] occlusion = ambientOcclusion(dist, vdx, vdy, vdz, gb, mat, w, h, f.sampleAngle() * scale);
 
         // Clouds behind everything that isn't solid near terrain, at half resolution (they're soft anyway).
         sky.prepareClouds(f, w, h, dist, depth, fbW, scale, fadeEnd * 0.55);
@@ -139,6 +161,8 @@ final class RealisticShader {
         float[] open = new float[n];
         double[] c = new double[3], s = new double[3], amb = new double[3], opq = new double[3], haze = new double[3], d = new double[3];
         double[] scratch = new double[3], sd = new double[3], skyC = new double[3], c2 = new double[3], tint = new double[3], lodAlb = new double[3];
+        double[] surfAlb = new double[3];
+        Texels texels = new Texels(blocks, f.sampleAngle() * scale);
         // Angle covered by one supersample, for choosing how detailed distant textures are.
         double sampleAngle = f.sampleAngle();
         // From here on, dist holds the distance to whatever each shaded pixel shows (for reflections).
@@ -246,10 +270,17 @@ final class RealisticShader {
                         ar = ((alb >> 16) & 255) / 255.0; ag = ((alb >> 8) & 255) / 255.0; ab = (alb & 255) / 255.0;
                     }
                     double ox = cam.x + d[0] * dist[i], oy = cam.y + d[1] * dist[i], oz = cam.z + d[2] * dist[i];
-                    double sun = shadow[i];
+                    surfAlb[0] = toLinear(ar); surfAlb[1] = toLinear(ag); surfAlb[2] = toLinear(ab);
+                    double cavity = 1;
+                    if ((texels.footprint(gb.normal[i], d, dist[i]) > 1 || mat[i] == LEAVES) && texels.locate(ox, oy, oz)) {
+                        texels.filter(surfAlb);
+                        if (mat[i] == LEAVES) cavity = texels.relief();
+                    }
+                    // The gaps between leaves are shaded by the leaves around them.
+                    double sun = shadow[i] * (0.7 + 0.3 * cavity);
                     if (water && sun > 0) sun *= caustics(ox, oz, wy - oy, lx, ly, lz);
-                    shadeOpaque(gb, i, d, ox, oy, oz, toLinear(ar), toLinear(ag), toLinear(ab), sun, atm, sky, st,
-                            blocks, cursor, lx, ly, lz, lightIrr, lightUp, translucent, amb, opq);
+                    shadeOpaque(gb, i, mat[i], texels.normal, Math.min(occlusion[i], 0.5 + 0.5 * cavity), d, ox, oy, oz, surfAlb[0], surfAlb[1],
+                            surfAlb[2], sun, atm, sky, st, blocks, cursor, lx, ly, lz, lightIrr, lightUp, translucent, amb, opq);
                     surfDist = dist[i];
                 } else {
                     // Glass or water with nothing near behind it: it's in front of the background.
@@ -397,14 +428,14 @@ final class RealisticShader {
             LodBlocks.sample(hit.baked, hit.face, hit.a, hit.b, mip, tint, alb);
             double skyL = lod.skyAt(hit.fx, hit.fy, hit.fz) / 15.0, blockL = lod.blockLightAt(hit.fx, hit.fy, hit.fz) / 15.0;
             double ao = lod.ambientOcclusion(hit);
-            boolean foliage = LodTerrain.isFoliage(hit.state);
+            int material = material(hit.state);
             double ndl = hit.nx * lx + hit.ny * ly + hit.nz * lz;
             double shadow = 0;
-            if (lightUp > 0 && skyL > 0.01 && (ndl > 0 || foliage)) {
+            if (lightUp > 0 && skyL > 0.01 && (ndl > 0 || material != SOLID)) {
                 boolean blocked = lod.trace(px + hit.nx * 0.01, py + hit.ny * 0.01, pz + hit.nz * 0.01, lx, ly, lz, 0.01, 400, shadowHit);
                 shadow = blocked && !shadowHit.deep ? 0 : 1;
             }
-            lightSurface(d, hit.nx, hit.ny, hit.nz, alb[0], alb[1], alb[2], skyL, blockL, ao, shadow, foliage,
+            lightSurface(d, hit.nx, hit.ny, hit.nz, alb[0], alb[1], alb[2], skyL, blockL, ao, shadow, material,
                     hit.state.getLightEmission() / 15.0, hit.water, px, py, pz, atm, sky, st, lightIrr, lx, ly, lz, lightUp, amb, behind);
         }
         double dist = t;
@@ -427,18 +458,18 @@ final class RealisticShader {
         return lum;
     }
 
-    /** Direct light, sky light, block light and a light floor on an opaque surface. */
-    private static void shadeOpaque(GBuffer gb, int i, double[] d, double ox, double oy, double oz,
+    /** Direct light, sky light, block light and a light floor on an opaque surface ({@code n}: facing the camera). */
+    private static void shadeOpaque(GBuffer gb, int i, int material, double[] n, double occlusion, double[] d, double ox, double oy, double oz,
                                     double ar, double ag, double ab, double shadow, Atmosphere atm, Sky sky,
                                     DailyCamsConfig.RealisticSettings st, ChunkMeshCache.FastBlockGetter blocks,
                                     BlockPos.MutableBlockPos cursor, double lx, double ly, double lz, double[] lightIrr,
                                     double lightUp, boolean covered, double[] amb, double[] out) {
-        int np = gb.normal[i], lp = gb.light[i];
-        double nx = GBuffer.nx(np), ny = GBuffer.ny(np), nz = GBuffer.nz(np);
-        if (nx * d[0] + ny * d[1] + nz * d[2] > 0) { nx = -nx; ny = -ny; nz = -nz; } // two-sided plants
-        double skyL = GBuffer.sky(lp), blockL = GBuffer.block(lp), ao = GBuffer.ao(lp);
+        int lp = gb.light[i];
+        double nx = n[0], ny = n[1], nz = n[2];
+        // Minecraft's corner shading and the screen-space occlusion both darken corners: keep the darker, not both.
+        double skyL = GBuffer.sky(lp), blockL = GBuffer.block(lp), ao = Math.min(GBuffer.ao(lp), occlusion);
         BlockState state = blocks.getBlockState(cursor.set(Mth.floor(ox - nx * 0.02), Mth.floor(oy - ny * 0.02), Mth.floor(oz - nz * 0.02)));
-        lightSurface(d, nx, ny, nz, ar, ag, ab, skyL, blockL, ao, shadow, isFoliage(state), state.getLightEmission() / 15.0,
+        lightSurface(d, nx, ny, nz, ar, ag, ab, skyL, blockL, ao, shadow, material, state.getLightEmission() / 15.0,
                 covered, ox, oy, oz, atm, sky, st, lightIrr, lx, ly, lz, lightUp, amb, out);
     }
 
@@ -448,17 +479,32 @@ final class RealisticShader {
      * for light sources. Albedo is linear; {@code ao} is 0-1 corner brightness.
      */
     private static void lightSurface(double[] d, double nx, double ny, double nz, double ar, double ag, double ab,
-                                     double skyL, double blockL, double aoRaw, double shadow, boolean foliage,
+                                     double skyL, double blockL, double aoRaw, double shadow, int material,
                                      double emission, boolean covered, double ox, double oy, double oz, Atmosphere atm,
                                      Sky sky, DailyCamsConfig.RealisticSettings st, double[] lightIrr, double lx,
                                      double ly, double lz, double lightUp, double[] amb, double[] out) {
+        // Grass and flowers are crossed quads facing every way: light them like the ground they grow on.
+        if (material == PLANT) { nx = 0; ny = 1; nz = 0; }
         double ao = Math.pow(Math.clamp(aoRaw, 0, 1), 2.0);
         double skyVis = Math.pow(skyL, 2.4) * SHADE;
         atm.ambient(nx, ny, nz, amb);
         double ndl = nx * lx + ny * ly + nz * lz;
-        double diffuse = foliage ? Math.max(0, (ndl + 0.35) / 1.35) : Math.max(0, ndl);
-        double direct = diffuse * shadow * lightUp * (skyL > 0.01 ? sky.cloudShadow(ox, oy, oz) : 0);
-        double back = foliage ? Math.max(0, -ndl) * 0.3 * shadow * lightUp : 0;
+        double lit = lightUp * (skyL > 0.01 ? sky.cloudShadow(ox, oy, oz) : 0), sun = shadow * lit;
+        // A leaf block is a cloud of small leaves facing every way, so it's lit from any side the light reaches it.
+        double diffuse = material == LEAVES ? 0.3 + 0.7 * Math.max(0, ndl) : Math.max(0, ndl);
+        double direct = diffuse * sun;
+        // Light coming through leaves and blades towards the eye: mostly forward, so strongest looking into the sun.
+        double through = 0, sheen = 0;
+        if (material != SOLID && sun > 0) {
+            double mu = d[0] * lx + d[1] * ly + d[2] * lz;
+            through = lit * (material == LEAVES ? 0.4 : 0.15) * (0.3 + 0.7 * Math.max(0, -ndl)) * Sky.hg(mu, 0.4);
+            if (material == LEAVES && ndl > 0) {
+                // Seen edge-on, the leaves in front hide each other's highlights.
+                double ndv = -(nx * d[0] + ny * d[1] + nz * d[2]);
+                sheen = sun * 0.12 * smoothstep(0.1, 0.5, ndv) * ggx(d, nx, ny, nz, lx, ly, lz, 0.45, 0.04);
+            }
+        }
+        double lum = Math.max(1e-4, 0.2126 * ar + 0.7152 * ag + 0.0722 * ab);
         double torch = 2.2 * Math.pow(blockL, 3.2);
         double floor = Math.PI * (st.minLight + 0.1 * sky.dimensionLight);
         // Light sources glow (and bloom), less so seen through water or glass.
@@ -466,9 +512,29 @@ final class RealisticShader {
 
         double[] alb = {ar, ag, ab};
         for (int k = 0; k < 3; k++) {
-            double e = amb[k] * skyVis * ao + lightIrr[k] * (direct + back) + TORCH[k] * torch * ao + FLOOR_TINT[k] * floor * ao;
-            out[k] = alb[k] / Math.PI * e + alb[k] * glow;
+            // What comes through leaves has been coloured by them on the way: more saturated than what they reflect,
+            // and the colour they let through (green) gets deeper into a canopy than the light that reaches it directly.
+            double tint = Math.min(2, Math.sqrt(alb[k] / lum));
+            double e = amb[k] * skyVis * ao + lightIrr[k] * (direct + through * tint * Math.pow(shadow, 1 - 0.6 * Math.min(1, tint)))
+                    + TORCH[k] * torch * ao + FLOOR_TINT[k] * floor * ao;
+            out[k] = alb[k] / Math.PI * e + alb[k] * glow + lightIrr[k] * sheen;
         }
+    }
+
+    /** GGX specular reflection (Smith visibility, Schlick Fresnel) of a light, times n·l. */
+    private static double ggx(double[] d, double nx, double ny, double nz, double lx, double ly, double lz,
+                              double roughness, double f0) {
+        double hx = lx - d[0], hy = ly - d[1], hz = lz - d[2], hl = Math.sqrt(hx * hx + hy * hy + hz * hz);
+        if (hl < 1e-6) return 0;
+        hx /= hl; hy /= hl; hz /= hl;
+        double ndl = Math.max(0, nx * lx + ny * ly + nz * lz), ndv = Math.max(1e-3, -(nx * d[0] + ny * d[1] + nz * d[2]));
+        double ndh = Math.max(0, nx * hx + ny * hy + nz * hz), vdh = Math.max(0, lx * hx + ly * hy + lz * hz);
+        double a2 = roughness * roughness * roughness * roughness;
+        double q = ndh * ndh * (a2 - 1) + 1;
+        double dist = a2 / (Math.PI * q * q);
+        double vis = 0.5 / (ndl * Math.sqrt(ndv * ndv * (1 - a2) + a2) + ndv * Math.sqrt(ndl * ndl * (1 - a2) + a2) + 1e-6);
+        double fresnel = f0 + (1 - f0) * Math.pow(1 - vdh, 5);
+        return dist * vis * fresnel * ndl;
     }
 
     /**
@@ -560,6 +626,94 @@ final class RealisticShader {
     }
 
     /**
+     * The block face texel each pixel shows, from the {@link LodBlocks} pictures, for two things Camera Obscura
+     * doesn't do. Textures without flicker in the distance: it samples textures without mipmaps, so where a pixel
+     * covers several texels it shows one of them more or less at random, and distant leaves and grass sparkle. There,
+     * the albedo is blended towards the face's averaged texture, tinted with the biome colour Camera Obscura uses for
+     * that block. And relief on leaves up close ({@link LodBlocks#relief}).
+     */
+    static final class Texels {
+        private final ChunkMeshCache.FastBlockGetter blocks;
+        private final double pixelAngle;
+        private final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        private final double[] white = {1, 1, 1}, tint = new double[3], avg = new double[3];
+        private BlockState tintState;
+        private long tintPos = Long.MIN_VALUE;
+        /** The surface's normal, facing the camera, and how many texels one pixel covers. */
+        final double[] normal = new double[3];
+        double footprint;
+        private BlockState state;
+        private LodBlocks.Baked baked;
+        private int face;
+        private double a, b;
+
+        Texels(ChunkMeshCache.FastBlockGetter blocks, double pixelAngle) {
+            this.blocks = blocks;
+            this.pixelAngle = pixelAngle;
+        }
+
+        /** Sets {@link #normal} and returns {@link #footprint}. */
+        double footprint(int packedNormal, double[] d, double dist) {
+            double nx = GBuffer.nx(packedNormal), ny = GBuffer.ny(packedNormal), nz = GBuffer.nz(packedNormal);
+            if (nx * d[0] + ny * d[1] + nz * d[2] > 0) { nx = -nx; ny = -ny; nz = -nz; } // two-sided plants
+            normal[0] = nx; normal[1] = ny; normal[2] = nz;
+            double cos = Math.max(0.15, -(nx * d[0] + ny * d[1] + nz * d[2]));
+            return footprint = dist * pixelAngle * LodBlocks.RES / cos;
+        }
+
+        /** Finds the face and the spot on it after {@link #footprint}; false where there's no block (entities). */
+        boolean locate(double ox, double oy, double oz) {
+            double nx = normal[0], ny = normal[1], nz = normal[2];
+            pos.set(Mth.floor(ox - nx * 0.02), Mth.floor(oy - ny * 0.02), Mth.floor(oz - nz * 0.02));
+            state = blocks.getBlockState(pos);
+            baked = LodBlocks.get(state, blocks);
+            if (baked.empty) return false;
+            double fx = Math.clamp(ox - pos.getX(), 0, 1), fy = Math.clamp(oy - pos.getY(), 0, 1), fz = Math.clamp(oz - pos.getZ(), 0, 1);
+            double ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
+            if (ax >= ay && ax >= az) { face = nx > 0 ? 0 : 1; a = fz; b = fy; }
+            else if (ay >= az) { face = ny > 0 ? 2 : 3; a = fx; b = fz; }
+            else { face = nz > 0 ? 4 : 5; a = fx; b = fy; }
+            return true;
+        }
+
+        /** {@code alb}: the surface's linear albedo, blended in place where the pixel covers several texels. */
+        void filter(double[] alb) {
+            double k = smoothstep(1, 2, footprint);
+            if (k <= 0) return;
+            if (baked.tint != LodBlocks.Tint.NONE && (state != tintState || pos.asLong() != tintPos)) {
+                tintState = state;
+                tintPos = pos.asLong();
+                ChunkAccess chunk = ((FastBlockGetterInvoker) (Object) blocks).dailycams$getChunkAt(pos);
+                int tc = chunk != null ? BlockColors.get(chunk, state, pos) : -1;
+                tint[0] = toLinear(((tc >> 16) & 255) / 255.0); tint[1] = toLinear(((tc >> 8) & 255) / 255.0); tint[2] = toLinear((tc & 255) / 255.0);
+            }
+            LodBlocks.sample(baked, face, a, b, Math.log(footprint) / Math.log(2), baked.tint == LodBlocks.Tint.NONE ? white : tint, avg);
+            if (avg[0] + avg[1] + avg[2] <= 0) return;
+            for (int c = 0; c < 3; c++) alb[c] += (avg[c] - alb[c]) * k;
+        }
+
+        /**
+         * Bends {@link #normal} by the slope of the leaf texel's relief, and returns how far out of the gaps the
+         * texel lies (1 = on top). Fades out where a pixel covers more than about a texel, where it would only add
+         * noise.
+         */
+        double relief() {
+            float[] r = baked.relief[face];
+            double fade = 1 - smoothstep(0.6, 1.5, footprint);
+            if (r == null || fade <= 0) return 1;
+            int t = (Math.min(LodBlocks.RES - 1, (int) (b * LodBlocks.RES)) * LodBlocks.RES + Math.min(LodBlocks.RES - 1, (int) (a * LodBlocks.RES))) * 3;
+            double sa = r[t] * RELIEF * fade, sb = r[t + 1] * RELIEF * fade;
+            // The picture's axes: X faces show (z, y), Y faces (x, z), Z faces (x, y).
+            int axisA = face < 2 ? 2 : 0, axisB = face >= 2 && face < 4 ? 2 : 1;
+            normal[axisA] -= sa;
+            normal[axisB] -= sb;
+            double l = Math.sqrt(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
+            normal[0] /= l; normal[1] /= l; normal[2] /= l;
+            return 1 - fade * (1 - Math.clamp(r[t + 2] * 1.2, 0, 1));
+        }
+    }
+
+    /**
      * Screen-space reflections: follows a reflected ray through the picture and returns what it runs into, from the
      * pixels already shaded (the rows above the current one; reflections on water mostly look upwards on screen).
      */
@@ -629,12 +783,49 @@ final class RealisticShader {
         }
     }
 
-    private static boolean isFoliage(BlockState state) {
-        return state.getBlock() instanceof LeavesBlock || state.is(BlockTags.REPLACEABLE) || state.is(BlockTags.FLOWERS)
-                || state.is(BlockTags.SAPLINGS) || state.is(BlockTags.CROPS);
+    /**
+     * The leaf block next to a point in the air that it's nearest to, if there's one it could stick out of
+     * ({@link BushyLeaves}), otherwise {@code air}. All 26 neighbours: the planes' corners cross block edges.
+     */
+    private static BlockState leavesAround(ChunkMeshCache.FastBlockGetter blocks, BlockPos.MutableBlockPos cursor,
+                                           double x, double y, double z, BlockState air) {
+        int bx = Mth.floor(x), by = Mth.floor(y), bz = Mth.floor(z);
+        BlockState best = air;
+        double bestD = Double.POSITIVE_INFINITY;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (dx == 0 && dy == 0 && dz == 0) continue;
+                    BlockState n = blocks.getBlockState(cursor.set(bx + dx, by + dy, bz + dz));
+                    if (!(n.getBlock() instanceof LeavesBlock)) continue;
+                    // Squared distance from the point to that block.
+                    double ex = Math.max(0, Math.max(bx + dx - x, x - (bx + dx + 1)));
+                    double ey = Math.max(0, Math.max(by + dy - y, y - (by + dy + 1)));
+                    double ez = Math.max(0, Math.max(bz + dz - z, z - (bz + dz + 1)));
+                    double d2 = ex * ex + ey * ey + ez * ez;
+                    if (d2 < bestD) { bestD = d2; best = n; }
+                }
+            }
+        }
+        return best;
     }
 
-    /** Fraction of light reaching a point (voxel walk; leaves let some light through). */
+    /** How a surface is lit: solid, leaves (and vines, which keep their normal), or plants (lit with an up normal). */
+    private static final int SOLID = 0, LEAVES = 1, PLANT = 2;
+
+    private static int material(BlockState state) {
+        // Air is in #replaceable too; what's found there is an entity, not a plant.
+        if (state.isAir()) return SOLID;
+        Block block = state.getBlock();
+        if (block instanceof LeavesBlock || block instanceof VineBlock || block instanceof MultifaceBlock) return LEAVES;
+        return state.is(BlockTags.REPLACEABLE) || state.is(BlockTags.FLOWERS) || state.is(BlockTags.SAPLINGS)
+                || state.is(BlockTags.CROPS) ? PLANT : SOLID;
+    }
+
+    /**
+     * Fraction of light reaching a point (voxel walk; leaves let some light through). A point inside a leaf block
+     * (an inner face, seen through the gaps of the leaves) gets the light through that block too.
+     */
     private static double transmittanceToLight(ChunkMeshCache.FastBlockGetter blocks, BlockPos.MutableBlockPos cursor,
                                                double ox, double oy, double oz, double dx, double dy, double dz, int maxY) {
         int x = Mth.floor(ox), y = Mth.floor(oy), z = Mth.floor(oz);
@@ -645,7 +836,7 @@ final class RealisticShader {
         double tMaxX = dx == 0 ? Double.POSITIVE_INFINITY : ((dx > 0 ? x + 1 - ox : ox - x) * tDeltaX);
         double tMaxY = dy == 0 ? Double.POSITIVE_INFINITY : ((dy > 0 ? y + 1 - oy : oy - y) * tDeltaY);
         double tMaxZ = dz == 0 ? Double.POSITIVE_INFINITY : ((dz > 0 ? z + 1 - oz : oz - z) * tDeltaZ);
-        double t = 1;
+        double t = blocks.getBlockState(cursor.set(x, y, z)).getBlock() instanceof LeavesBlock ? LEAF_TRANSMITTANCE : 1;
         for (int i = 0; i < MAX_SHADOW_STEPS; i++) {
             if (tMaxX < tMaxY && tMaxX < tMaxZ) { x += stepX; tMaxX += tDeltaX; }
             else if (tMaxY < tMaxZ) { y += stepY; tMaxY += tDeltaY; }
@@ -654,13 +845,90 @@ final class RealisticShader {
             BlockState state = blocks.getBlockState(cursor.set(x, y, z));
             if (state.isAir()) continue;
             if (state.getBlock() instanceof LeavesBlock) {
-                t *= 0.42;
+                t *= LEAF_TRANSMITTANCE;
                 if (t < 0.04) return 0;
             } else if (state.canOcclude()) {
                 return 0;
             }
         }
         return t;
+    }
+
+    /**
+     * Screen-space ambient occlusion (after Alchemy AO), at half resolution: how much of the hemisphere above each
+     * surface the geometry around it on screen covers, within {@link #AO_RADIUS} blocks. 1 = open, also where
+     * there's no surface. Darkens canopy interiors, plants and the ground under trees, which Minecraft's corner
+     * shading leaves alone.
+     */
+    private static float[] ambientOcclusion(float[] dist, float[] vdx, float[] vdy, float[] vdz, GBuffer gb, byte[] mat,
+                                            int w, int h, double pixelAngle) {
+        int hw = Math.max(1, w / 2), hh = Math.max(1, h / 2), m = hw * hh;
+        float[] hd = new float[m], px = new float[m], py = new float[m], pz = new float[m], nx = new float[m], ny = new float[m], nz = new float[m];
+        for (int y = 0; y < hh; y++) {
+            for (int x = 0; x < hw; x++) {
+                int j = y * hw + x, i = Math.min(h - 1, y * 2) * w + Math.min(w - 1, x * 2);
+                float d = dist[i];
+                hd[j] = d;
+                if (!Float.isFinite(d)) continue;
+                px[j] = vdx[i] * d; py[j] = vdy[i] * d; pz[j] = vdz[i] * d;
+                if (mat[i] == PLANT) { ny[j] = 1; continue; }
+                int np = gb.normal[i];
+                double sx = GBuffer.nx(np), sy = GBuffer.ny(np), sz = GBuffer.nz(np);
+                double flip = sx * vdx[i] + sy * vdy[i] + sz * vdz[i] > 0 ? -1 : 1;
+                nx[j] = (float) (sx * flip); ny[j] = (float) (sy * flip); nz[j] = (float) (sz * flip);
+            }
+        }
+        float[] ao = new float[m];
+        double r2 = AO_RADIUS * AO_RADIUS;
+        for (int y = 0; y < hh; y++) {
+            Throttle.checkpoint();
+            for (int x = 0; x < hw; x++) {
+                int j = y * hw + x;
+                if (!Float.isFinite(hd[j])) { ao[j] = 1; continue; }
+                double radius = Math.clamp(AO_RADIUS / (hd[j] * pixelAngle * 2), 1.5, 40);
+                // A different rotation of the sample spiral for each pixel of a 4x4 tile; the blur averages them.
+                double rot = ((x & 3) * 4 + (y & 3)) * (Math.PI * 2 / 16);
+                double sum = 0;
+                for (int k = 0; k < AO_SAMPLES; k++) {
+                    double a = rot + k * 2.399963, rr = radius * Math.sqrt((k + 0.5) / AO_SAMPLES);
+                    int sx = x + (int) Math.round(Math.cos(a) * rr), sy = y + (int) Math.round(Math.sin(a) * rr);
+                    if (sx < 0 || sy < 0 || sx >= hw || sy >= hh) continue;
+                    int s = sy * hw + sx;
+                    if (!Float.isFinite(hd[s])) continue;
+                    double vx = px[s] - px[j], vy = py[s] - py[j], vz = pz[s] - pz[j], vv = vx * vx + vy * vy + vz * vz;
+                    if (vv < 1e-6 || vv > r2) continue;
+                    double cos = (vx * nx[j] + vy * ny[j] + vz * nz[j]) / Math.sqrt(vv);
+                    sum += Math.max(0, cos - 0.1) * (1 - vv / r2);
+                }
+                ao[j] = (float) Math.max(0.4, 1 - 2.0 * sum / AO_SAMPLES);
+            }
+        }
+        ao = softenShadows(ao, hd, hw, hh, 2);
+        // Back to full resolution, from the half-resolution neighbours at a similar distance.
+        float[] out = new float[w * h];
+        for (int y = 0; y < h; y++) {
+            Throttle.checkpoint();
+            for (int x = 0; x < w; x++) {
+                int i = y * w + x;
+                float d = dist[i];
+                if (!Float.isFinite(d)) { out[i] = 1; continue; }
+                double fx = Math.clamp(x / 2.0, 0, hw - 1), fy = Math.clamp(y / 2.0, 0, hh - 1);
+                int x0 = (int) fx, y0 = (int) fy;
+                double sum = 0, wsum = 0;
+                for (int k = 0; k < 4; k++) {
+                    int xx = Math.min(hw - 1, x0 + (k & 1)), yy = Math.min(hh - 1, y0 + (k >> 1));
+                    int s = yy * hw + xx;
+                    if (!Float.isFinite(hd[s])) continue;
+                    double rel = (hd[s] - d) / (0.03 * d + 0.05);
+                    double wt = ((k & 1) == 1 ? fx - x0 : 1 - (fx - x0)) * ((k >> 1) == 1 ? fy - y0 : 1 - (fy - y0)) + 1e-3;
+                    wt *= Math.exp(-rel * rel);
+                    sum += ao[s] * wt;
+                    wsum += wt;
+                }
+                out[i] = wsum > 1e-6 ? (float) (sum / wsum) : 1;
+            }
+        }
+        return out;
     }
 
     /** Separable blur that only mixes pixels at a similar distance, so shadows don't bleed across edges. */

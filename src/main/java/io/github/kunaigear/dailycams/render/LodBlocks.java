@@ -39,6 +39,8 @@ final class LodBlocks {
 
     static final class Baked {
         final float[][] faces = new float[6][];
+        /** Per face and texel (see {@link #relief}): height slope along a and b, and the height. */
+        final float[][] relief = new float[6][];
         Tint tint = Tint.NONE;
         int fixedTint = -1;
         boolean empty = true;
@@ -155,6 +157,7 @@ final class LodBlocks {
                 data[i * STRIDE + 6] = a;
             }
             if (!any) continue;
+            baked.relief[face] = relief(depth[face], color[face], NORMALS[face][0] + NORMALS[face][1] + NORMALS[face][2]);
             buildMips(data);
             baked.faces[face] = data;
             baked.empty = false;
@@ -208,6 +211,47 @@ final class LodBlocks {
                 }
             }
         }
+    }
+
+    /**
+     * A height map of a face for lighting leaves up close as if each cluster of leaves were a small bump: the face
+     * itself is high, the gaps through it (where the far side shows) are low, and darker texels a little lower.
+     * Smoothed so the clusters look rounded; it wraps around because leaf textures tile.
+     */
+    private static float[] relief(float[] depth, float[] color, int sign) {
+        float[] height = new float[RES * RES];
+        for (int i = 0; i < RES * RES; i++) {
+            if (depth[i] == Float.NEGATIVE_INFINITY) continue;
+            // Depth runs from 0 (the far side of the block) to 1 (the side it's seen from).
+            double d = Math.clamp(depth[i] + (sign < 0 ? 1 : 0), 0, 1);
+            double luma = 0.2126 * color[i * 4] + 0.7152 * color[i * 4 + 1] + 0.0722 * color[i * 4 + 2];
+            height[i] = (float) (0.7 * d + 0.3 * luma);
+        }
+        float[] smooth = blur3(blur3(height));
+        float[] out = new float[RES * RES * 3];
+        for (int y = 0; y < RES; y++) {
+            for (int x = 0; x < RES; x++) {
+                int i = y * RES + x;
+                out[i * 3] = (smooth[y * RES + (x + 1) % RES] - smooth[y * RES + (x + RES - 1) % RES]) * 0.5f;
+                out[i * 3 + 1] = (smooth[((y + 1) % RES) * RES + x] - smooth[((y + RES - 1) % RES) * RES + x]) * 0.5f;
+                out[i * 3 + 2] = smooth[i];
+            }
+        }
+        return out;
+    }
+
+    private static float[] blur3(float[] in) {
+        float[] out = new float[RES * RES];
+        for (int y = 0; y < RES; y++) {
+            for (int x = 0; x < RES; x++) {
+                float sum = 0;
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dx = -1; dx <= 1; dx++) sum += in[((y + dy + RES) % RES) * RES + (x + dx + RES) % RES];
+                }
+                out[y * RES + x] = sum / 9;
+            }
+        }
+        return out;
     }
 
     /** Averages the 16x16 picture down to 8x8, 4x4, 2x2 and 1x1 (premultiplied, so coverage averages too). */

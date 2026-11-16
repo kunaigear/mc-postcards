@@ -5,6 +5,7 @@
   "mixins": [
     "ChunkMeshCacheMixin",
     "ChunkMeshCacheInvoker",
+    "FastBlockGetterInvoker",
     "ChunkMeshInvoker",
     "ChunkMapInvoker",
     "PlayerRendererAccessor",

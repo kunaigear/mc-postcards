@@ -61,6 +61,8 @@ Renders land in `config/dailycams/renders/<camera>/`.
 | `meadow.jpg` | cherry | `3500` | simple shader |
 | `mountains.jpg` | peaks | `8500` | simple shader |
 | `coast.jpg` | coast | `1800` | simple shader |
+| `shaders-noon.jpg` | village | `noon` | `none`, `simple` and `realistic`, left to right |
+| `shaders-sunset.jpg` | village | `12300` | `none`, `simple` and `realistic`, left to right |
 | `realistic-comparison.jpg` | village | `noon` | `simple` (left), `realistic` (right) |
 | `realistic-cherry.jpg` | cherry | `noon` | realistic shader |
 | `realistic-sunset.jpg` | village | `12300` | realistic shader |
@@ -73,7 +75,8 @@ Distant terrain only shows chunks that exist. Before the distant-terrain picture
 the cameras with the test mod: `dcgen -304 -80 135 64` for peaks and `dcgen -170 -860 -30 64` for village.
 
 Pictures are scaled down from the renders: single ones to 1280 px wide (`village.jpg` to 1600 px), and each half of
-a side-by-side one to 960 px (800 px with a label for `shader-comparison.jpg` and `render-distance.jpg`).
+a side-by-side one to 960 px (800 px with a label for `shader-comparison.jpg` and `render-distance.jpg`), and each
+third of `shaders-noon.jpg` and `shaders-sunset.jpg` to 640 px with a label.
 
 ## Project layout
 

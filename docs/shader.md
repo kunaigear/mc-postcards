@@ -7,12 +7,16 @@ players don't need anything for them. They're unrelated to Iris shader packs on 
 
 | `"shader"` | Look | Extra time per camera (1080p, 2-core host) |
 |---|---|---|
-| `simple` (default) | Camera Obscura's picture with sun shadows, warm light, haze, bloom and a colour grade. | about 6 s |
-| `realistic` | Relit from scratch, in the style of shader packs like Photon: physical sky, volumetric clouds, soft shadows, sun rays, reflections in water, filmic colour. | about 20 s |
+| `simple` (default) | Camera Obscura's picture with sun shadows, warm light, haze, bloom and a colour grade. | about 7 s |
+| `realistic` | Relit from scratch, in the style of shader packs like Photon: physical sky, volumetric clouds, soft shadows, sun rays, leaves that glow in the sun, reflections in water, filmic colour. | about 29 s |
 | `none` | Camera Obscura's plain picture. | – |
 
 Choose one for every camera with `"shader"` in the config, or for one camera with
 `/dailycam shader <simple|realistic|none> [name]`. `default` makes a camera follow the config again.
+
+![The same village at noon with each shader](images/shaders-noon.jpg)
+
+![The same village at sunset with each shader](images/shaders-sunset.jpg)
 
 ## Realistic
 
@@ -30,15 +34,22 @@ lights the scene again from scratch:
   grey underneath, and get a silver edge when you look towards the sun. They change from day to day and with the
   weather, and cast soft shadows on the land when the sun is high.
 - **Sunlight and shadows.** Rays are traced through the world's blocks towards the sun (or the moon at night).
-  Shadow edges are softened, and leaves let some light through, so tree shadows are dappled and backlit leaves glow.
-- **Sky light** with the actual colour of the sky, weakened in shade, under overhangs and in corners. Torches,
+  Shadow edges are softened, and leaves let some light through, so tree shadows are dappled.
+- **Leaves and plants.** Leaves stick out of their blocks, so trees have a ragged outline instead of cubes. A leaf
+  block is lit like a cloud of small leaves rather than a solid cube: bright wherever the sun reaches it, darker
+  deeper in the canopy. Looking towards the sun, light shines through the leaves, so the
+  edges of canopies glow green. Up close, each cluster of leaves in the texture has a little relief and a soft
+  sheen. Grass, flowers and crops are lit like the ground they grow on.
+- **Sky light** with the actual colour of the sky, weakened in shade, under overhangs and in corners. Ambient
+  occlusion, worked out from the picture, darkens canopy interiors, plants and the ground under trees. Torches,
   lanterns and other light sources give off warm light, and glow.
 - **Water** reflects what's around it: trees, hills and distant terrain that are in the picture, and the sky and
   clouds where the reflection leaves the picture. Gentle waves break up the reflections near the camera and calm
   down further away. It gets darker and bluer the deeper it is, and the ground in shallow water shows caustics,
   the bright lines of sunlight focused by the waves.
 - **Sun rays.** Looking towards a low sun, light streams through gaps in trees, terrain and clouds.
-- **Distance haze** that matches the sky, and the edge of the loaded world fades into it.
+- **Distance haze** that matches the sky, and the edge of the loaded world fades into it. Distant textures are
+  averaged like mipmaps, so far-away grass and leaves don't sparkle.
 - **Exposure and colour like a camera.** The picture is computed in high dynamic range and exposed automatically
   for the land (the sky stays bright, sunsets don't blow out), then tone mapped with AgX, a filmic curve that keeps
   bright colours from clipping. A little bloom, a slight vignette and some sharpening.
@@ -76,11 +87,10 @@ The realistic shader is tuned with `realisticSettings`:
 
 ### Cost
 
-On the 2-core test host, the realistic shader took 16 s for a 1080p picture, against 6 s for the simple one, under
-the same CPU limit as the rest of the render. TPS stayed at 20 and no tick took longer than 25 ms. The clouds,
-reflections and sun rays added since make it about a third slower (4.9 s to 6.5 s for the same 1080p view on a
-desktop CPU without a limit), so expect about 20 s on that host. It needs about 150 MB of extra memory at 1080p,
-and about 4× that at 4K.
+On the [2-core test host](performance.md#measurements), with the default CPU limit, a 1080p picture of the village
+took 149–152 s with the realistic shader, against 128–129 s with the simple one and 121–123 s without a shader. The
+shading itself took about 25 s, and the leaves sticking out of their blocks made drawing the frame about 4 s slower.
+TPS stayed at 20 throughout. It needs about 170 MB of extra memory at 1080p, and about 4× that at 4K.
 
 The realistic shader replaces Camera Obscura's sky, clouds and fog with its own.
 
@@ -118,6 +128,6 @@ The simple shader is tuned with `shaderSettings`:
 
 ### Cost
 
-The simple shader adds 1–9 seconds per camera, depending on resolution and CPU. It runs in the background under
-the same CPU limit as the rest of the render, and in the [2-core test](performance.md) the shading phase caused no
-hitches.
+The simple shader adds about 7 s per 1080p camera on the 2-core test host, less on a faster CPU. It runs in the
+background under the same CPU limit as the rest of the render, and in the [2-core test](performance.md#measurements)
+the shading phase caused no hitches.

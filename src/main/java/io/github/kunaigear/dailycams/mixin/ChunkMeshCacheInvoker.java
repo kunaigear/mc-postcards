@@ -18,4 +18,17 @@ public interface ChunkMeshCacheInvoker {
             net.minecraft.world.level.BlockGetter level, int x, int y, int z, net.minecraft.world.level.block.state.BlockState state) {
         throw new AssertionError();
     }
+
+    @Invoker("computeCulledFaces")
+    static java.util.EnumSet<net.minecraft.core.Direction> dailycams$computeCulledFaces(
+            net.minecraft.world.level.BlockGetter level, int x, int y, int z, net.minecraft.world.level.block.state.BlockState state) {
+        throw new AssertionError();
+    }
+
+    @Invoker("buildModelWithLighting")
+    static de.tomalbrc.cameraobscura.sore.model.Model dailycams$buildModelWithLighting(
+            net.minecraft.world.level.BlockAndLightGetter level, int x, int y, int z, de.tomalbrc.cameraobscura.sore.model.Mesh mesh,
+            net.minecraft.world.level.block.state.BlockState state) {
+        throw new AssertionError();
+    }
 }

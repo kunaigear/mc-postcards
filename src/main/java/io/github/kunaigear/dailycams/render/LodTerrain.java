@@ -10,7 +10,6 @@ import net.minecraft.util.Mth;
 import net.minecraft.util.SimpleBitStorage;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.biome.Biome;
-import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.LevelChunkSection;
@@ -484,10 +483,5 @@ final class LodTerrain {
         if (s1 && s2) return 0.4;
         boolean c = occludes(fx + ua[0] * sa + ub[0] * sb, fy + ua[1] * sa + ub[1] * sb, fz + ua[2] * sa + ub[2] * sb);
         return 1 - 0.2 * ((s1 ? 1 : 0) + (s2 ? 1 : 0) + (c ? 1 : 0));
-    }
-
-    static boolean isFoliage(BlockState s) {
-        return s.getBlock() instanceof LeavesBlock || s.is(net.minecraft.tags.BlockTags.REPLACEABLE)
-                || s.is(net.minecraft.tags.BlockTags.FLOWERS);
     }
 }
