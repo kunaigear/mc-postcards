@@ -97,6 +97,10 @@ public final class DailyCamsConfig {
         public double vignette = 0.12;
         /** Strength of reflections on water (1 = physically based). */
         public double waterReflections = 1.0;
+        /** Rays of sunlight through gaps in trees, terrain and clouds, in the haze. */
+        public double sunRays = 1.0;
+        /** Sharpening of the finished picture (0 = off). */
+        public double sharpness = 0.35;
     }
 
     /** Knobs for the "simple" shader. */
@@ -227,6 +231,8 @@ public final class DailyCamsConfig {
         rs.vignette = Mth.clamp(rs.vignette, 0, 1);
         rs.clarity = Mth.clamp(rs.clarity, 0, 1);
         rs.waterReflections = Mth.clamp(rs.waterReflections, 0, 2);
+        rs.sunRays = Mth.clamp(rs.sunRays, 0, 3);
+        rs.sharpness = Mth.clamp(rs.sharpness, 0, 1);
 
         if (scheduleTimes == null) scheduleTimes = new ArrayList<>();
         List<LocalTime> times = new ArrayList<>();
