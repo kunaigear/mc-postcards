@@ -1,6 +1,8 @@
 package io.github.kunaigear.dailycams.render;
 
 import io.github.kunaigear.dailycams.config.DailyCamsConfig;
+import io.github.kunaigear.dailycams.mixin.FastBlockGetterInvoker;
+import de.tomalbrc.cameraobscura.color.BlockColors;
 import de.tomalbrc.cameraobscura.renderer.ChunkMeshCache;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.BlockTags;
@@ -13,6 +15,7 @@ import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.MultifaceBlock;
 import net.minecraft.world.level.block.VineBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4d;
 import org.joml.Vector3d;
@@ -155,6 +158,8 @@ final class RealisticShader {
         float[] open = new float[n];
         double[] c = new double[3], s = new double[3], amb = new double[3], opq = new double[3], haze = new double[3], d = new double[3];
         double[] scratch = new double[3], sd = new double[3], skyC = new double[3], c2 = new double[3], tint = new double[3], lodAlb = new double[3];
+        double[] surfAlb = new double[3];
+        Texels texels = new Texels(blocks, f.sampleAngle() * scale);
         // Angle covered by one supersample, for choosing how detailed distant textures are.
         double sampleAngle = f.sampleAngle();
         // From here on, dist holds the distance to whatever each shaded pixel shows (for reflections).
@@ -262,10 +267,12 @@ final class RealisticShader {
                         ar = ((alb >> 16) & 255) / 255.0; ag = ((alb >> 8) & 255) / 255.0; ab = (alb & 255) / 255.0;
                     }
                     double ox = cam.x + d[0] * dist[i], oy = cam.y + d[1] * dist[i], oz = cam.z + d[2] * dist[i];
+                    surfAlb[0] = toLinear(ar); surfAlb[1] = toLinear(ag); surfAlb[2] = toLinear(ab);
+                    if (texels.footprint(gb.normal[i], d, dist[i]) > 1 && texels.locate(ox, oy, oz)) texels.filter(surfAlb);
                     double sun = shadow[i];
                     if (water && sun > 0) sun *= caustics(ox, oz, wy - oy, lx, ly, lz);
-                    shadeOpaque(gb, i, mat[i], occlusion[i], d, ox, oy, oz, toLinear(ar), toLinear(ag), toLinear(ab), sun, atm, sky, st,
-                            blocks, cursor, lx, ly, lz, lightIrr, lightUp, translucent, amb, opq);
+                    shadeOpaque(gb, i, mat[i], texels.normal, occlusion[i], d, ox, oy, oz, surfAlb[0], surfAlb[1],
+                            surfAlb[2], sun, atm, sky, st, blocks, cursor, lx, ly, lz, lightIrr, lightUp, translucent, amb, opq);
                     surfDist = dist[i];
                 } else {
                     // Glass or water with nothing near behind it: it's in front of the background.
@@ -443,15 +450,14 @@ final class RealisticShader {
         return lum;
     }
 
-    /** Direct light, sky light, block light and a light floor on an opaque surface. */
-    private static void shadeOpaque(GBuffer gb, int i, int material, double occlusion, double[] d, double ox, double oy, double oz,
+    /** Direct light, sky light, block light and a light floor on an opaque surface ({@code n}: facing the camera). */
+    private static void shadeOpaque(GBuffer gb, int i, int material, double[] n, double occlusion, double[] d, double ox, double oy, double oz,
                                     double ar, double ag, double ab, double shadow, Atmosphere atm, Sky sky,
                                     DailyCamsConfig.RealisticSettings st, ChunkMeshCache.FastBlockGetter blocks,
                                     BlockPos.MutableBlockPos cursor, double lx, double ly, double lz, double[] lightIrr,
                                     double lightUp, boolean covered, double[] amb, double[] out) {
-        int np = gb.normal[i], lp = gb.light[i];
-        double nx = GBuffer.nx(np), ny = GBuffer.ny(np), nz = GBuffer.nz(np);
-        if (nx * d[0] + ny * d[1] + nz * d[2] > 0) { nx = -nx; ny = -ny; nz = -nz; } // two-sided plants
+        int lp = gb.light[i];
+        double nx = n[0], ny = n[1], nz = n[2];
         // Minecraft's corner shading and the screen-space occlusion both darken corners: keep the darker, not both.
         double skyL = GBuffer.sky(lp), blockL = GBuffer.block(lp), ao = Math.min(GBuffer.ao(lp), occlusion);
         BlockState state = blocks.getBlockState(cursor.set(Mth.floor(ox - nx * 0.02), Mth.floor(oy - ny * 0.02), Mth.floor(oz - nz * 0.02)));
@@ -609,6 +615,74 @@ final class RealisticShader {
         double lines = Math.pow(a, 7) + Math.pow(b, 7);
         double strength = smoothstep(0.05, 1.2, depth) * Math.exp(-depth * 0.12);
         return Math.max(0, 1 + strength * (lines * 2.6 - 0.55));
+    }
+
+    /**
+     * The block face texel each pixel shows, from the {@link LodBlocks} pictures, for textures without flicker in
+     * the distance. Camera Obscura samples textures without mipmaps, so where a pixel
+     * covers several texels it shows one of them more or less at random, and distant leaves and grass sparkle. There,
+     * the albedo is blended towards the face's averaged texture, tinted with the biome colour Camera Obscura uses for
+     * that block.
+     */
+    static final class Texels {
+        private final ChunkMeshCache.FastBlockGetter blocks;
+        private final double pixelAngle;
+        private final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        private final double[] white = {1, 1, 1}, tint = new double[3], avg = new double[3];
+        private BlockState tintState;
+        private long tintPos = Long.MIN_VALUE;
+        /** The surface's normal, facing the camera, and how many texels one pixel covers. */
+        final double[] normal = new double[3];
+        double footprint;
+        private BlockState state;
+        private LodBlocks.Baked baked;
+        private int face;
+        private double a, b;
+
+        Texels(ChunkMeshCache.FastBlockGetter blocks, double pixelAngle) {
+            this.blocks = blocks;
+            this.pixelAngle = pixelAngle;
+        }
+
+        /** Sets {@link #normal} and returns {@link #footprint}. */
+        double footprint(int packedNormal, double[] d, double dist) {
+            double nx = GBuffer.nx(packedNormal), ny = GBuffer.ny(packedNormal), nz = GBuffer.nz(packedNormal);
+            if (nx * d[0] + ny * d[1] + nz * d[2] > 0) { nx = -nx; ny = -ny; nz = -nz; } // two-sided plants
+            normal[0] = nx; normal[1] = ny; normal[2] = nz;
+            double cos = Math.max(0.15, -(nx * d[0] + ny * d[1] + nz * d[2]));
+            return footprint = dist * pixelAngle * LodBlocks.RES / cos;
+        }
+
+        /** Finds the face and the spot on it after {@link #footprint}; false where there's no block (entities). */
+        boolean locate(double ox, double oy, double oz) {
+            double nx = normal[0], ny = normal[1], nz = normal[2];
+            pos.set(Mth.floor(ox - nx * 0.02), Mth.floor(oy - ny * 0.02), Mth.floor(oz - nz * 0.02));
+            state = blocks.getBlockState(pos);
+            baked = LodBlocks.get(state, blocks);
+            if (baked.empty) return false;
+            double fx = Math.clamp(ox - pos.getX(), 0, 1), fy = Math.clamp(oy - pos.getY(), 0, 1), fz = Math.clamp(oz - pos.getZ(), 0, 1);
+            double ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
+            if (ax >= ay && ax >= az) { face = nx > 0 ? 0 : 1; a = fz; b = fy; }
+            else if (ay >= az) { face = ny > 0 ? 2 : 3; a = fx; b = fz; }
+            else { face = nz > 0 ? 4 : 5; a = fx; b = fy; }
+            return true;
+        }
+
+        /** {@code alb}: the surface's linear albedo, blended in place where the pixel covers several texels. */
+        void filter(double[] alb) {
+            double k = smoothstep(1, 2, footprint);
+            if (k <= 0) return;
+            if (baked.tint != LodBlocks.Tint.NONE && (state != tintState || pos.asLong() != tintPos)) {
+                tintState = state;
+                tintPos = pos.asLong();
+                ChunkAccess chunk = ((FastBlockGetterInvoker) (Object) blocks).dailycams$getChunkAt(pos);
+                int tc = chunk != null ? BlockColors.get(chunk, state, pos) : -1;
+                tint[0] = toLinear(((tc >> 16) & 255) / 255.0); tint[1] = toLinear(((tc >> 8) & 255) / 255.0); tint[2] = toLinear((tc & 255) / 255.0);
+            }
+            LodBlocks.sample(baked, face, a, b, Math.log(footprint) / Math.log(2), baked.tint == LodBlocks.Tint.NONE ? white : tint, avg);
+            if (avg[0] + avg[1] + avg[2] <= 0) return;
+            for (int c = 0; c < 3; c++) alb[c] += (avg[c] - alb[c]) * k;
+        }
     }
 
     /**
