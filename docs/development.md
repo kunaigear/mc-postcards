@@ -31,6 +31,49 @@ The test mod is never part of the release jar. It adds:
   checks permission tiers, limits, name rules and username changes.
 - **A tick profiler:** `run/dctest-ticks.csv` gets one line per server tick, with its duration, the gap since the
   previous tick, and what the renderer was doing (`idle`, `loading`, `building`, `drawing` or `shading`).
+- **`dcgen <x> <z> <yaw> <radius>`** (console): generates the chunks in a 140° wedge in front of a point, out to
+  `radius` chunks, so [distant terrain](distant-terrain.md) has something to show on a fresh world.
+
+## Documentation pictures
+
+The pictures in `docs/images/` are renders from a world with seed `12345` (`level-type=minecraft:normal`), at the
+default 1920×1080, FOV 70 and `renderDistance` 16. To render them again, start a test server with that seed and run
+this in the console:
+
+```
+gamerule advance_time false
+gamerule advance_weather false
+weather clear
+dailycam set village -169.5 81 -859.5 -30 25
+dailycam set cherry -415.5 137 768.5 -150 18
+dailycam set peaks -303.5 120 -79.5 135 -4
+dailycam set coast 9000.5 140 9000.5 30 20
+```
+
+Then set the time, choose the shader with `dailycam shader <shader> <camera>`, and run `dailycam test <camera>`.
+Renders land in `config/dailycams/renders/<camera>/`.
+
+| Image | Camera | Time | Settings |
+|---|---|---|---|
+| `village.jpg` | village | `noon` | simple shader |
+| `shader-comparison.jpg` | village | `noon` | `none` (left), `simple` (right) |
+| `render-distance.jpg` | village | `noon` | `renderDistance` 6 (left), 16 (right) |
+| `meadow.jpg` | cherry | `3500` | simple shader |
+| `mountains.jpg` | peaks | `8500` | simple shader |
+| `coast.jpg` | coast | `1800` | simple shader |
+| `realistic-comparison.jpg` | village | `noon` | `simple` (left), `realistic` (right) |
+| `realistic-cherry.jpg` | cherry | `noon` | realistic shader |
+| `realistic-sunset.jpg` | village | `12300` | realistic shader |
+| `realistic-night.jpg` | village | `midnight` | realistic shader |
+| `realistic-peaks-sunset.jpg` | peaks | `12300` | realistic shader |
+| `lod-comparison.jpg` | peaks | `noon` | realistic shader, `lodDistance` 0 (left), 64 (right) |
+| `lod-detail.jpg` | peaks | `noon` | the `lodDistance` 64 render, cropped to x 0–1100, y 300–820 |
+
+Distant terrain only shows chunks that exist. Before the distant-terrain pictures, generate the land in front of
+the cameras with the test mod: `dcgen -304 -80 135 64` for peaks and `dcgen -170 -860 -30 64` for village.
+
+Pictures are scaled down from the renders: single ones to 1280 px wide (`village.jpg` to 1600 px), and each half of
+a side-by-side one to 960 px (800 px with a label for `shader-comparison.jpg` and `render-distance.jpg`).
 
 ## Project layout
 
