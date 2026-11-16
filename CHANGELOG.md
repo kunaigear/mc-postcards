@@ -6,6 +6,7 @@ A server-side Minecraft Fabric mod: players place virtual cameras with `/dailyca
 - New `realistic` shader in the style of Photon: a physically based sky with clouds that change daily, sunlight coloured by the atmosphere, soft shadows, light through leaves, water reflections, haze, automatic exposure and filmic (AgX) colour. Nights and caves stay visible. Choose it with `"shader": "realistic"` or `/dailycam shader realistic [name]`; tune it with `realisticSettings`. It takes about 10 s more per camera than the simple shader
 - The client helper reads which `/dailycam set` options the server supports and only adds those, so it now works on older servers too (on a 1.2.0 server it no longer causes "Incorrect argument")
 - A `config.json` or `cameras.json` with an error is backed up as `<file>.broken-<date>` and no longer overwritten; `/dailycam reload` shows the error and keeps the previous settings and cameras
+- Players in a picture get the skin they joined with. Camera Obscura looked each skin up on Mojang's session server, and when Mojang rate-limited the server (HTTP 429), that player stayed in the default skin until a restart
 - A daily run interrupted by a stop or crash is finished after the restart
 - Webhook URLs are shown as scheme and host only, and players no longer see webhook error details (they're in the server log, redacted)
 - Pictures are encoded before they wait for upload, so a slow webhook can't pile up large images in memory
