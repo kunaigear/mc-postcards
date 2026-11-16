@@ -92,11 +92,12 @@ final class RealisticShader {
         Vector3d tmp = new Vector3d();
         for (int y = 0; y < h; y++) {
             Throttle.checkpoint();
-            int fbY = (h - 1 - y) * scale + scale / 2;
-            double ndcY = (fbY + 0.5) / fbH * 2 - 1;
             for (int x = 0; x < w; x++) {
                 int i = y * w + x;
-                int fbX = x * scale + scale / 2;
+                // The sample the G-buffer kept the opaque surface at (the centre one if there is none).
+                int os = gb.hasOpaque(i) ? gb.opaqueSample[i] : gb.centre;
+                int fbX = x * scale + os % scale, fbY = (h - 1 - y) * scale + os / scale;
+                double ndcY = (fbY + 0.5) / fbH * 2 - 1;
                 tmp.set((fbX + 0.5) / fbW * 2 - 1, ndcY, 1.0);
                 f.inverseViewProjection().transformProject(tmp);
                 double vx = tmp.x - cam.x, vy = tmp.y - cam.y, vz = tmp.z - cam.z, vl = Math.sqrt(vx * vx + vy * vy + vz * vz);
@@ -132,8 +133,7 @@ final class RealisticShader {
         double[] c = new double[3], s = new double[3], amb = new double[3], opq = new double[3], haze = new double[3], d = new double[3];
         double[] scratch = new double[3], sd = new double[3], skyC = new double[3], c2 = new double[3], tint = new double[3], lodAlb = new double[3];
         // Angle covered by one supersample, for choosing how detailed distant textures are.
-        int mid = (h / 2) * w + w / 2;
-        double sampleAngle = Math.acos(Math.clamp(vdx[mid] * vdx[mid + 1] + vdy[mid] * vdy[mid + 1] + vdz[mid] * vdz[mid + 1], -1, 1)) / scale;
+        double sampleAngle = f.sampleAngle();
         for (int y = 0; y < h; y++) {
             Throttle.checkpoint();
             int fbYBase = (h - 1 - y) * scale;
@@ -154,7 +154,7 @@ final class RealisticShader {
                 // near terrain's.
                 boolean lodBg = false;
                 double lodMeter = 0;
-                if (bg > 0 || (!opaque && !translucent)) {
+                if (bg > 0 || !opaque) {
                     if (lod == null) {
                         sky.radiance(d[0], d[1], d[2], true, s);
                     } else {
@@ -190,7 +190,7 @@ final class RealisticShader {
                         lodMeter = hits > 0 ? msum / hits : 0;
                     }
                 }
-                if (bg == samples || (!opaque && !translucent)) {
+                if (!opaque && !translucent) {
                     store(hr, hg, hb, i, s);
                     if (lodBg) {
                         surface[i] = true;
@@ -226,7 +226,8 @@ final class RealisticShader {
                             blocks, cursor, lx, ly, lz, lightIrr, lightUp, translucent, amb, opq);
                     surfDist = dist[i];
                 } else {
-                    opq[0] = opq[1] = opq[2] = 0;
+                    // Glass or water with nothing near behind it: it's in front of the background.
+                    opq[0] = s[0]; opq[1] = s[1]; opq[2] = s[2];
                     surfDist = gb.tDist[i];
                 }
 
@@ -250,7 +251,9 @@ final class RealisticShader {
                 meter[i] = (float) (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]);
                 applyHaze(c, d, surfDist, cam, sky, st, overcast, fadeEnd, haze);
 
-                double cover = bg / (double) samples;
+                // Background samples without a surface. Camera Obscura doesn't write depth for translucent surfaces,
+                // so where there is only glass or water, its background samples are still covered by it.
+                double cover = opaque ? bg / (double) samples : 0;
                 for (int k = 0; k < 3; k++) c[k] += (s[k] - c[k]) * cover;
                 store(hr, hg, hb, i, c);
                 surface[i] = cover < 0.5 || lodBg;

@@ -53,8 +53,8 @@ public final class DailyCamsConfig {
 
     /**
      * How far distant terrain is drawn, in chunks (like Voxy or Distant Horizons). Beyond renderDistance, terrain
-     * is drawn as a simplified height map built from the chunks the server has saved. 0 = off. Only explored
-     * (saved) terrain appears.
+     * is traced through the blocks of the chunks the server has saved. 0 = off. Only explored (saved) terrain
+     * appears.
      */
     public int lodDistance = 64;
 

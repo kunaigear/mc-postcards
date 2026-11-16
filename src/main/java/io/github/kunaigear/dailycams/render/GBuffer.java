@@ -12,19 +12,26 @@ import java.util.Arrays;
  * without Camera Obscura's lighting (texture colour, normal, sky and block light, ambient occlusion), so the shader
  * can light it again from scratch.
  * <p>
- * One sample per output pixel is kept, at the centre of its supersampled block (the same sample the shaders read
- * depth from). The frontmost opaque surface and the frontmost translucent one (water, glass) are kept separately.
+ * One sample per output pixel is kept. For opaque surfaces it's the sample nearest the centre of the pixel's
+ * supersampled block that shows one ({@link #opaqueSample}), so a thin edge isn't lost when the centre sample misses
+ * it; translucent surfaces use the centre sample. The frontmost opaque surface and the frontmost translucent one
+ * (water, glass) are kept separately.
  * Only active on the render thread while {@link #ACTIVE} is set.
  */
 public final class GBuffer {
     private static final ThreadLocal<GBuffer> ACTIVE = new ThreadLocal<>();
 
     final int width, height, scale, fbWidth;
-    private final int half;
+    /** Index ({@code row * scale + column} in the framebuffer's orientation) of the centre sample of a block. */
+    final int centre;
+    /** Order of preference of each sample in a block: nearest the centre first. */
+    private final int[] rank;
 
     /** Opaque: texture colour times tint (sRGB, alpha unused), normal (packed), lights (packed), Camera Obscura's light. */
     final int[] albedo, normal, light;
     final float[] coLight;
+    /** Which sample of the block the opaque surface was recorded at. */
+    final byte[] opaqueSample;
     /** Translucent: colour with alpha, normal, lights, distance from the camera (infinite = none). */
     final int[] tAlbedo, tNormal, tLight;
     final float[] tDist;
@@ -34,12 +41,19 @@ public final class GBuffer {
         this.height = height;
         this.scale = scale;
         this.fbWidth = fbWidth;
-        this.half = scale / 2;
+        int half = scale / 2;
+        this.centre = half * scale + half;
+        rank = new int[scale * scale];
+        for (int i = 0; i < rank.length; i++) {
+            int dx = i % scale - half, dy = i / scale - half;
+            rank[i] = (dx * dx + dy * dy) * rank.length + i;
+        }
         int n = width * height;
         albedo = new int[n];
         normal = new int[n];
         light = new int[n];
         coLight = new float[n];
+        opaqueSample = new byte[n];
         tAlbedo = new int[n];
         tNormal = new int[n];
         tLight = new int[n];
@@ -70,13 +84,19 @@ public final class GBuffer {
      */
     public void record(int idx, FragmentIn in, Uniforms uniforms, int src) {
         int fx = idx % fbWidth, fy = idx / fbWidth;
-        if (fx % scale != half || fy % scale != half) return;
         int ox = fx / scale, oy = height - 1 - fy / scale;
         if (ox >= width || oy < 0) return;
         int i = oy * width + ox;
+        int sample = (fy % scale) * scale + fx % scale;
 
         int alpha = src >>> 24;
         if (alpha == 0) return; // cut-out part of a texture: nothing is drawn
+        if (alpha == 255) {
+            // A surface at a sample further from the centre than the one already kept doesn't replace it.
+            if (hasOpaque(i) && sample != opaqueSample[i] && rank[sample] > rank[opaqueSample[i]]) return;
+        } else if (sample != centre) {
+            return;
+        }
 
         int tex = in.texture.sampleAnimated(in.u, in.v, uniforms.time);
         int tint = in.tint;
@@ -93,8 +113,9 @@ public final class GBuffer {
             normal[i] = packedNormal;
             light[i] = packedLight;
             coLight[i] = (float) matteLight(in, uniforms);
+            opaqueSample[i] = (byte) sample;
             // An opaque surface drawn later in front of a translucent one (entities are drawn late) hides it.
-            if (dist < tDist[i]) tDist[i] = Float.POSITIVE_INFINITY;
+            if (sample == centre && dist < tDist[i]) tDist[i] = Float.POSITIVE_INFINITY;
         } else if (dist < tDist[i]) {
             tAlbedo[i] = alpha << 24 | r << 16 | g << 8 | b;
             tNormal[i] = packedNormal;

@@ -98,13 +98,17 @@ final class CameraRenderer {
                 // With distant terrain, Camera Obscura's fog would end the near terrain in a wall of fog.
                 // Not where the world has a roof (the Nether): the saved height maps would show only the roof.
                 boolean lodOn = s.lodDistance() > s.renderDistance() && !level.dimensionType().hasCeiling();
+                // Without the realistic shader, distant terrain needs to know where it shows through glass and water.
+                SeeThrough seeThrough = lodOn && gbuffer == null ? new SeeThrough() : null;
                 BufferedImage image;
                 if (gbuffer != null) gbuffer.activate();
+                if (seeThrough != null) seeThrough.activate();
                 RenderFlags.noFog(lodOn);
                 try {
                     image = renderer.render();
                 } finally {
                     GBuffer.deactivate();
+                    SeeThrough.deactivate();
                     RenderFlags.noFog(false);
                 }
                 long drawMs = (System.nanoTime() - drawStart) / 1_000_000;
@@ -114,8 +118,10 @@ final class CameraRenderer {
                 if (lodOn) {
                     stage = "lod";
                     long lodStart = System.nanoTime();
-                    double hfov = 2 * Math.atan(Math.tan(Math.toRadians(s.fov()) / 2) * s.width() / s.height());
-                    lod = LodTerrain.build(level, x, z, yaw, hfov, s.renderDistance() * 0.75, s.lodDistance());
+                    // Half the angle across the picture's diagonal, plus a margin.
+                    double aspect = (double) s.width() / s.height();
+                    double halfAngle = Math.atan(Math.tan(Math.toRadians(s.fov()) / 2) * Math.sqrt(1 + aspect * aspect)) + Math.toRadians(4);
+                    lod = LodTerrain.build(level, x, y, z, yaw, pitch, halfAngle, s.lodDistance());
                     lodMs = (System.nanoTime() - lodStart) / 1_000_000;
                 }
                 long shadeMs = 0;
@@ -124,7 +130,7 @@ final class CameraRenderer {
                 if (gbuffer != null) {
                     RealisticShader.apply(image, renderer.frame(), gbuffer, level, s.realistic(), lod, s.lodDistance());
                 } else {
-                    if (lod != null) LodSimple.apply(image, renderer.frame(), lod, level, s.simple(), !"none".equals(s.shader()), s.lodDistance());
+                    if (lod != null) LodSimple.apply(image, renderer.frame(), lod, seeThrough, level, s.simple(), !"none".equals(s.shader()), s.lodDistance());
                     if (!"none".equals(s.shader())) SimpleShader.apply(image, renderer.frame(), level, s.simple());
                 }
                 shadeMs = (System.nanoTime() - shadeStart) / 1_000_000;
