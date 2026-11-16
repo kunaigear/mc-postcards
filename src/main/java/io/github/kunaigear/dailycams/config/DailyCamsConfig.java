@@ -61,9 +61,9 @@ public final class DailyCamsConfig {
         /** Brightness on top of the automatic exposure (1 = as measured). */
         public double exposure = 1.0;
         /** How far the automatic exposure may brighten dark scenes such as nights and caves. */
-        public double maxExposure = 40;
+        public double maxExposure = 14;
         /** Light that is always there, so places without any light are not pitch black. */
-        public double minLight = 0.012;
+        public double minLight = 0.006;
         /** Haze over distant terrain (1 = natural). */
         public double haze = 1.0;
         /** Cloud cover (0 = clear skies, 1 = varies naturally from day to day, 2 = mostly cloudy). */
@@ -71,10 +71,12 @@ public final class DailyCamsConfig {
         /** Width of shadow edges (0 = hard). */
         public double shadowSoftness = 1.0;
         /** Glow around bright areas such as the sun and light sources. */
-        public double bloom = 0.06;
-        public double saturation = 1.15;
+        public double bloom = 0.08;
+        public double saturation = 1.2;
         /** Filmic contrast (1 = neutral). */
-        public double contrast = 1.12;
+        public double contrast = 1.25;
+        /** Local contrast: brings out detail and makes surfaces stand out from their surroundings. */
+        public double clarity = 0.3;
         /** Darkening towards the corners. */
         public double vignette = 0.12;
         /** Strength of reflections on water (1 = physically based). */
@@ -206,6 +208,7 @@ public final class DailyCamsConfig {
         rs.saturation = Mth.clamp(rs.saturation, 0, 2);
         rs.contrast = Mth.clamp(rs.contrast, 0.5, 2);
         rs.vignette = Mth.clamp(rs.vignette, 0, 1);
+        rs.clarity = Mth.clamp(rs.clarity, 0, 1);
         rs.waterReflections = Mth.clamp(rs.waterReflections, 0, 2);
 
         if (scheduleTimes == null) scheduleTimes = new ArrayList<>();

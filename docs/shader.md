@@ -37,8 +37,10 @@ lights the scene again from scratch:
   for the land (the sky stays bright, sunsets don't blow out), then tone mapped with AgX, a filmic curve that keeps
   bright colours from clipping. A little bloom, a slight vignette.
 
-Nights and caves aren't pitch black: the exposure brightens dark scenes (up to `maxExposure`), and a little light
-is always there (`minLight`). At night the moon lights the land and the stars are out.
+Nights are dark, but not pitch black: the exposure brightens dark scenes a little (up to `maxExposure`), a little
+light is always there (`minLight`), and dim areas shift towards night vision: bluer and less colourful. The moon
+lights the land and the stars are out. Torches and lanterns light warm pools around them; the exposure is capped
+so they never white out.
 
 | | |
 |---|---|
@@ -52,14 +54,15 @@ The realistic shader is tuned with `realisticSettings`:
 | Key | Default | Range | Effect |
 |---|---|---|---|
 | `exposure` | `1.0` | 0.1–10 | Brightness on top of the automatic exposure. |
-| `maxExposure` | `40` | 1–200 | How far dark scenes (night, caves) may be brightened. Lower = darker nights. |
-| `minLight` | `0.012` | 0–0.5 | Light that's always there, so places without any light aren't pitch black. |
+| `maxExposure` | `14` | 1–200 | How far dark scenes (night, caves) may be brightened. Higher = brighter nights. |
+| `minLight` | `0.006` | 0–0.5 | Light that's always there, so places without any light aren't pitch black. |
 | `haze` | `1.0` | 0–5 | Haze over distant terrain. |
 | `clouds` | `1.0` | 0–2 | Cloud cover: 0 = always clear, 1 = varies from day to day, 2 = mostly cloudy. Rain adds clouds either way. |
 | `shadowSoftness` | `1.0` | 0–4 | Width of shadow edges (0 = hard). |
-| `bloom` | `0.06` | 0–1 | Glow around the sun and light sources. |
-| `saturation` | `1.15` | 0–2 | Colour intensity. |
-| `contrast` | `1.12` | 0.5–2 | Filmic contrast (1 = neutral). |
+| `bloom` | `0.08` | 0–1 | Glow around the sun and light sources. |
+| `saturation` | `1.2` | 0–2 | Colour intensity. |
+| `contrast` | `1.25` | 0.5–2 | Filmic contrast (1 = neutral). |
+| `clarity` | `0.3` | 0–1 | Local contrast: brings out detail and makes surfaces stand out from their surroundings. |
 | `vignette` | `0.12` | 0–1 | Darkening towards the corners. |
 | `waterReflections` | `1.0` | 0–2 | Strength of reflections on water (1 = physically based). |
 

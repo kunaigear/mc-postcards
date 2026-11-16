@@ -12,7 +12,7 @@ final class Atmosphere {
     private static final double[] BETA_O = {0.650e-6, 1.881e-6, 0.085e-6};
     private static final double HR = 8000, HM = 1200, MIE_SCATTER = 3.0e-6, MIE_EXTINCT = 3.3e-6, MIE_G = 0.76;
     /** Light lost to single scattering that comes back as multiple scattering (rough approximation). */
-    private static final double MULTI_SCATTER = 3.0;
+    private static final double MULTI_SCATTER = 2.5;
 
     static final double SUN_ILLUMINANCE = 3.0;
     /** Faint light of the night sky itself (airglow, scattered starlight). */

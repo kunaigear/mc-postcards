@@ -35,6 +35,8 @@ final class RealisticShader {
     private static final double CLOUD_ALTITUDE = 900;
     private static final double[] TORCH = {1.0, 0.56, 0.26};
     private static final double[] FLOOR_TINT = {0.86, 0.93, 1.1};
+    /** How much of the sky's light reaches surfaces in shade. Below 1 for deeper, more contrasty shadows. */
+    private static final double SHADE = 0.72;
 
     static void apply(BufferedImage image, SimpleShader.Frame f, GBuffer gb, Level level, DailyCamsConfig.RealisticSettings st) {
         int w = image.getWidth(), h = image.getHeight(), n = w * h;
@@ -185,7 +187,7 @@ final class RealisticShader {
                 // Aerial perspective: distant surfaces fade into the light of the atmosphere in front of them.
                 double py = cam.y + d[1] * surfDist;
                 double height = Math.exp(-Math.max(0, (py + cam.y) * 0.5 - 64) / 140);
-                double density = st.haze / 1400.0 * (1 + 3 * overcast) * height;
+                double density = st.haze / 2200.0 * (1 + 3 * overcast) * height;
                 double fogAmt = 1 - Math.exp(-surfDist * density);
                 double hy = Math.max(d[1], Atmosphere.HAZE_ELEVATION), hl = Math.sqrt(1 - hy * hy), dh = Math.hypot(d[0], d[2]);
                 sky.radiance(dh > 1e-6 ? d[0] / dh * hl : hl, hy, dh > 1e-6 ? d[2] / dh * hl : 0, false, haze);
@@ -216,21 +218,21 @@ final class RealisticShader {
         int np = gb.normal[i], lp = gb.light[i];
         double nx = GBuffer.nx(np), ny = GBuffer.ny(np), nz = GBuffer.nz(np);
         if (nx * d[0] + ny * d[1] + nz * d[2] > 0) { nx = -nx; ny = -ny; nz = -nz; } // two-sided plants
-        double skyL = GBuffer.sky(lp), blockL = GBuffer.block(lp), ao = Math.pow(Math.clamp(GBuffer.ao(lp), 0, 1), 1.3);
+        double skyL = GBuffer.sky(lp), blockL = GBuffer.block(lp), ao = Math.pow(Math.clamp(GBuffer.ao(lp), 0, 1), 2.0);
         BlockState state = blocks.getBlockState(cursor.set(Mth.floor(ox - nx * 0.02), Mth.floor(oy - ny * 0.02), Mth.floor(oz - nz * 0.02)));
         boolean foliage = isFoliage(state);
 
-        double skyVis = skyL * skyL;
+        double skyVis = Math.pow(skyL, 2.4) * SHADE;
         atm.ambient(nx, ny, nz, amb);
         double ndl = nx * lx + ny * ly + nz * lz;
         double diffuse = foliage ? Math.max(0, (ndl + 0.35) / 1.35) : Math.max(0, ndl);
         double direct = diffuse * shadow * lightUp * (skyL > 0.01 ? sky.cloudShadow(ox, oy, oz) : 0);
         double back = foliage ? Math.max(0, -ndl) * 0.3 * shadow * lightUp : 0;
-        double torch = 3.0 * Math.pow(blockL, 2.4);
+        double torch = 2.2 * Math.pow(blockL, 3.2);
         double floor = Math.PI * st.minLight;
         double emission = state.getLightEmission() / 15.0;
         // Light sources glow (and bloom), less so seen through water or glass.
-        double glow = emission > 0 ? (covered ? 0.2 : 1.1) * emission * emission : 0;
+        double glow = emission > 0 ? (covered ? 0.15 : 0.7) * emission * emission : 0;
 
         double[] alb = {ar, ag, ab};
         for (int k = 0; k < 3; k++) {
@@ -381,12 +383,35 @@ final class RealisticShader {
         double exposure = Math.clamp(0.10 / Math.pow(avg, 0.85) / Math.pow(0.05, 0.15), 0.45, st.maxExposure);
         // Highlight protection: keep the brightest tenth of the picture (often the sky at sunset) out of the range
         // where the tone curve washes colours out to white.
-        exposure = Math.min(exposure, 0.8 / Math.max(percentile(r, g, b, 0.9), 1e-6)) * st.exposure;
+        exposure = Math.min(exposure, 0.8 / Math.max(percentile(r, g, b, 0.9), 1e-6));
+        // ...and for small, very bright areas, such as the ground around torches at night.
+        exposure = Math.min(exposure, 3.2 / Math.max(percentile(r, g, b, 0.995), 1e-6)) * st.exposure;
+        // How much of a night scene this is, for night vision below.
+        double night = smoothstep(3.5, 12, exposure);
         io.github.kunaigear.dailycams.DailyCams.LOGGER.debug("Realistic shader: average luminance {}, exposure {}",
                 String.format("%.4f", avg), String.format("%.2f", exposure));
 
         int q = 4, bw = Math.max(1, w / q), bh = Math.max(1, h / q);
-        float[] br = new float[bw * bh], bgn = new float[bw * bh], bb = new float[bw * bh];
+        float[] br = new float[bw * bh], bgn = new float[bw * bh], bb = new float[bw * bh], local = new float[bw * bh];
+        if (st.clarity > 0) {
+            // Clarity: the average brightness of each pixel's surroundings (log), to boost differences from it.
+            for (int y = 0; y < bh; y++) {
+                for (int x = 0; x < bw; x++) {
+                    double sum = 0;
+                    for (int yy = 0; yy < q; yy++) {
+                        for (int xx = 0; xx < q; xx++) {
+                            int i = Math.min(h - 1, y * q + yy) * w + Math.min(w - 1, x * q + xx);
+                            sum += Math.log(Math.max(1e-5, 0.2126 * r[i] + 0.7152 * g[i] + 0.0722 * b[i]));
+                        }
+                    }
+                    local[y * bw + x] = (float) (sum / (q * q));
+                }
+            }
+            for (int pass = 0; pass < 2; pass++) {
+                Throttle.checkpoint();
+                boxBlur(local, bw, bh, 6);
+            }
+        }
         if (st.bloom > 0) {
             for (int y = 0; y < bh; y++) {
                 for (int x = 0; x < bw; x++) {
@@ -421,6 +446,18 @@ final class RealisticShader {
                 c[0] = r[i] * exposure + br[bi] * st.bloom;
                 c[1] = g[i] * exposure + bgn[bi] * st.bloom;
                 c[2] = b[i] * exposure + bb[bi] * st.bloom;
+                if (st.clarity > 0) {
+                    double lum = 0.2126 * r[i] + 0.7152 * g[i] + 0.0722 * b[i];
+                    double f = Math.exp(Math.clamp((Math.log(Math.max(lum, 1e-5)) - local[bi]) * st.clarity, -0.45, 0.45));
+                    c[0] *= f; c[1] *= f; c[2] *= f;
+                }
+                if (night > 0) {
+                    double lum = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+                    double k = 0.6 * night * (1 - smoothstep(0.02, 0.3, lum));
+                    c[0] += (lum * 0.72 - c[0]) * k;
+                    c[1] += (lum * 0.92 - c[1]) * k;
+                    c[2] += (lum * 1.35 - c[2]) * k;
+                }
                 AgX.apply(c, st.saturation, st.contrast);
                 double dx = (x - cx) / maxR, dy = (y - cy) / maxR;
                 double v = 1 - st.vignette * Math.pow(Math.min(1, Math.sqrt(dx * dx + dy * dy)), 2.4);
@@ -563,11 +600,11 @@ final class RealisticShader {
                         double[] irr = sunUp ? atm.sunIrradiance : atm.moonIrradiance;
                         double self = Math.exp(-3.2 * cloudAlpha(qx + lx * 180, qz + lz * 180));
                         double mu = dx * (sunUp ? atm.sx : atm.mx) + dy * (sunUp ? atm.sy : atm.my) + dz * (sunUp ? atm.sz : atm.mz);
-                        double forward = 1 + 1.6 * Math.pow(Math.max(0, mu), 10);
+                        double forward = 1 + 2.4 * Math.pow(Math.max(0, mu), 8) + 3.0 * Math.pow(Math.max(0, mu), 60) * (1 - a);
                         double fade = Math.exp(-t / 36000) * smoothstep(0.005, 0.09, dy);
                         double dim = 1 - 0.55 * overcast;
                         for (int k = 0; k < 3; k++) {
-                            double cr = (irr[k] * (0.06 + 0.94 * self) * 0.3 * forward + up[k] * 0.2) * dim;
+                            double cr = (irr[k] * (0.12 + 0.88 * self) * 0.34 * forward + up[k] * 0.3) * dim;
                             out[k] += (cr - out[k]) * a * fade;
                         }
                     }
