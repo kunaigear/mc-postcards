@@ -3,6 +3,7 @@ package io.github.kunaigear.dailycams.render;
 /** Switches for Camera Obscura's drawing while one of our renders runs on this thread. */
 public final class RenderFlags {
     private static final ThreadLocal<Boolean> NO_FOG = ThreadLocal.withInitial(() -> false);
+    private static final ThreadLocal<Boolean> BUSHY_LEAVES = ThreadLocal.withInitial(() -> false);
 
     private RenderFlags() {}
 
@@ -14,5 +15,15 @@ public final class RenderFlags {
 
     public static boolean noFog() {
         return NO_FOG.get();
+    }
+
+    /** Builds leaf blocks with leaves sticking out of them ({@link BushyLeaves}). */
+    static void bushyLeaves(boolean on) {
+        if (on) BUSHY_LEAVES.set(true);
+        else BUSHY_LEAVES.remove();
+    }
+
+    static boolean bushyLeaves() {
+        return BUSHY_LEAVES.get();
     }
 }

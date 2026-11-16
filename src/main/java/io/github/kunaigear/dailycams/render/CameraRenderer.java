@@ -53,6 +53,8 @@ final class CameraRenderer {
             // outside the build height) get an empty mesh instead. Building is by far the most expensive step.
             long meshStart = System.nanoTime();
             int built = 0, skipped = 0;
+            boolean realistic = "realistic".equals(s.shader());
+            RenderFlags.bushyLeaves(realistic);
             Long2ObjectOpenHashMap<ChunkMeshCache.ChunkMesh> meshes = new Long2ObjectOpenHashMap<>();
             for (int dx = -view.radius; dx <= view.radius; dx++) {
                 for (int dy = -view.radius; dy <= view.radius; dy++) {
@@ -76,6 +78,7 @@ final class CameraRenderer {
                     }
                 }
             }
+            RenderFlags.bushyLeaves(false);
             long meshMs = (System.nanoTime() - meshStart) / 1_000_000;
             if (skipped > 0) {
                 DailyCams.LOGGER.warn("Left out {} chunk sections from {} chunks that didn't load", skipped, missingColumns.size());
@@ -92,7 +95,6 @@ final class CameraRenderer {
                 renderer.entity = hidden;
                 // Every mesh is pinned and clean, so this only reads the sky/fog/sun values for the frame.
                 renderer.updateChunksInRange(level, false);
-                boolean realistic = "realistic".equals(s.shader());
                 // The realistic shader relights the frame, so it records what each pixel shows while drawing.
                 GBuffer gbuffer = realistic ? new GBuffer(s.width(), s.height(), s.ssaa(), s.width() * s.ssaa()) : null;
                 // With distant terrain, Camera Obscura's fog would end the near terrain in a wall of fog.
@@ -142,6 +144,7 @@ final class CameraRenderer {
                 PinnedMeshes.clear();
             }
         } finally {
+            RenderFlags.bushyLeaves(false);
             Throttle.end();
         }
     }

@@ -135,6 +135,7 @@ final class RealisticShader {
                 double nx = GBuffer.nx(np), ny = GBuffer.ny(np), nz = GBuffer.nz(np);
                 if (nx * vdx[i] + ny * vdy[i] + nz * vdz[i] > 0) { nx = -nx; ny = -ny; nz = -nz; }
                 BlockState state = blocks.getBlockState(cursor.set(Mth.floor(tmp.x - nx * 0.02), Mth.floor(tmp.y - ny * 0.02), Mth.floor(tmp.z - nz * 0.02)));
+                if (state.isAir()) state = leavesAround(blocks, cursor, tmp.x, tmp.y, tmp.z, state);
                 if (state != lastState) { lastState = state; lastMat = material(state); }
                 mat[i] = (byte) lastMat;
                 if (lightUp <= 0 || GBuffer.sky(gb.light[i]) <= 0.01) continue;
@@ -780,6 +781,33 @@ final class RealisticShader {
             if (py >= row) return -2;
             return py * w + px;
         }
+    }
+
+    /**
+     * The leaf block next to a point in the air that it's nearest to, if there's one it could stick out of
+     * ({@link BushyLeaves}), otherwise {@code air}. All 26 neighbours: the planes' corners cross block edges.
+     */
+    private static BlockState leavesAround(ChunkMeshCache.FastBlockGetter blocks, BlockPos.MutableBlockPos cursor,
+                                           double x, double y, double z, BlockState air) {
+        int bx = Mth.floor(x), by = Mth.floor(y), bz = Mth.floor(z);
+        BlockState best = air;
+        double bestD = Double.POSITIVE_INFINITY;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (dx == 0 && dy == 0 && dz == 0) continue;
+                    BlockState n = blocks.getBlockState(cursor.set(bx + dx, by + dy, bz + dz));
+                    if (!(n.getBlock() instanceof LeavesBlock)) continue;
+                    // Squared distance from the point to that block.
+                    double ex = Math.max(0, Math.max(bx + dx - x, x - (bx + dx + 1)));
+                    double ey = Math.max(0, Math.max(by + dy - y, y - (by + dy + 1)));
+                    double ez = Math.max(0, Math.max(bz + dz - z, z - (bz + dz + 1)));
+                    double d2 = ex * ex + ey * ey + ez * ez;
+                    if (d2 < bestD) { bestD = d2; best = n; }
+                }
+            }
+        }
+        return best;
     }
 
     /** How a surface is lit: solid, leaves (and vines, which keep their normal), or plants (lit with an up normal). */
