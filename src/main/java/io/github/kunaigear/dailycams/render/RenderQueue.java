@@ -39,6 +39,8 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -196,14 +198,18 @@ public final class RenderQueue {
                         for (ChunkPos p : toLoad) {
                             if (source.getChunkNow(p.x(), p.z()) == null) missing.add(p.pack());
                         }
-                        // Entities can only be queried safely here, on the server thread.
+                        // Entities and players can only be queried safely here, on the server thread.
                         Entity hidden = CameraRenderer.entityAtCamera(level, c.x, c.y, c.z);
+                        Map<UUID, String> skins = PlayerSkins.near(level, c.x, c.y, c.z, settings.renderDistance());
                         DailyCamsConfig cfg = request.config;
                         long started = System.nanoTime();
                         // Encoding happens on the render thread too, so a slow webhook only ever holds the small
                         // encoded file in memory, never the raw image.
                         CompletableFuture
-                                .supplyAsync(() -> encode(c, cfg, CameraRenderer.render(level, c.x, c.y, c.z, c.yaw, c.pitch, settings, missing, hidden)), renderExecutor)
+                                .supplyAsync(() -> {
+                                    PlayerSkins.prepare(skins);
+                                    return encode(c, cfg, CameraRenderer.render(level, c.x, c.y, c.z, c.yaw, c.pitch, settings, missing, hidden));
+                                }, renderExecutor)
                                 .whenComplete((encoded, error) -> server.execute(() -> onRendered(encoded, error, started)));
                     }
                 }
