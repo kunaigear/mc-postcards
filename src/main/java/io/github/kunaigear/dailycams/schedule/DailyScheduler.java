@@ -14,6 +14,7 @@ import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.SplittableRandom;
 
 /**
  * Decides when the daily run is due. The last started slot and the cameras of that run that haven't finished yet
@@ -25,6 +26,9 @@ public final class DailyScheduler {
         String lastSlot;
         List<String> pending;
     }
+
+    /** One Minecraft day. */
+    private static final long MAX_OFFSET_SECONDS = 20 * 60;
 
     private final Path stateFile;
     private @Nullable ZonedDateTime lastSlot;
@@ -58,11 +62,10 @@ public final class DailyScheduler {
     public boolean poll(DailyCamsConfig cfg) {
         ZonedDateTime now = ZonedDateTime.now(cfg.zone());
         ZonedDateTime slot = mostRecentSlot(cfg, now);
-        if (slot == null) return false;
-        if (lastSlot != null && !slot.toInstant().isAfter(lastSlot.toInstant())) return false;
+        if (slot == null || done(cfg, slot)) return false;
 
         markDone(slot);
-        boolean missed = now.isAfter(slot.plusMinutes(5));
+        boolean missed = now.isAfter(start(cfg, slot).plusMinutes(5));
         if (missed && !cfg.catchUpMissedRuns) {
             DailyCams.LOGGER.info("Skipping missed daily run scheduled for {}", slot);
             return false;
@@ -70,27 +73,48 @@ public final class DailyScheduler {
         return true;
     }
 
+    /** When the next run starts. */
     public @Nullable ZonedDateTime nextSlot(DailyCamsConfig cfg) {
         ZonedDateTime now = ZonedDateTime.now(cfg.zone());
-        for (int day = 0; day <= 1; day++) {
+        ZonedDateTime next = null;
+        for (int day = -1; day <= 1; day++) {
             LocalDate date = now.toLocalDate().plusDays(day);
             for (LocalTime t : cfg.times()) {
                 ZonedDateTime slot = date.atTime(t).atZone(cfg.zone());
-                if (slot.isAfter(now)) return slot;
+                if (done(cfg, slot)) continue;
+                ZonedDateTime start = start(cfg, slot);
+                if (start.isAfter(now) && (next == null || start.isBefore(next))) next = start;
             }
         }
-        return null;
+        return next;
     }
 
+    /** The slot whose run started most recently by {@code now}. */
     private static @Nullable ZonedDateTime mostRecentSlot(DailyCamsConfig cfg, ZonedDateTime now) {
-        for (int day = 0; day <= 1; day++) {
+        ZonedDateTime recent = null;
+        for (int day = 0; day <= 2; day++) {
             LocalDate date = now.toLocalDate().minusDays(day);
-            for (LocalTime t : cfg.times().reversed()) {
+            for (LocalTime t : cfg.times()) {
                 ZonedDateTime slot = date.atTime(t).atZone(cfg.zone());
-                if (!slot.isAfter(now)) return slot;
+                ZonedDateTime start = start(cfg, slot);
+                if (!start.isAfter(now) && (recent == null || start.isAfter(start(cfg, recent)))) recent = slot;
             }
         }
-        return null;
+        return recent;
+    }
+
+    /** Offsets can swap two slots less than 20 minutes apart, so runs are ordered by when they start. */
+    private boolean done(DailyCamsConfig cfg, ZonedDateTime slot) {
+        return lastSlot != null && !start(cfg, slot).toInstant().isAfter(start(cfg, lastSlot).toInstant());
+    }
+
+    /**
+     * The slot plus its random offset, if that's on. The offset is derived from the slot, so it survives restarts
+     * and reloads. SplittableRandom mixes its seed; java.util.Random gives similar first values for nearby seeds.
+     */
+    private static ZonedDateTime start(DailyCamsConfig cfg, ZonedDateTime slot) {
+        if (!cfg.randomScheduleOffset) return slot;
+        return slot.plusSeconds(new SplittableRandom(slot.toEpochSecond()).nextLong(MAX_OFFSET_SECONDS));
     }
 
     /** Records which cameras the run that just started includes. */

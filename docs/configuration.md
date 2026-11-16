@@ -41,6 +41,7 @@ Every post is an embed with the picture, the camera name, its coordinates and di
 | `scheduleTimes` | `["12:00"]` | One or more times per day (`HH:mm`) at which all cameras are rendered. |
 | `timeZone` | `""` | For example `Europe/Berlin`. If empty, the server's time zone is used. |
 | `catchUpMissedRuns` | `true` | If the server was offline at a scheduled time, render as soon as it's back. |
+| `randomScheduleOffset` | `false` | Starts each run at a random time up to 20 minutes after the scheduled one. A Minecraft day lasts 20 minutes, so the pictures show every time of day equally often instead of the same one every day. `/dailycam status` shows the actual time of the next run. |
 | `width`, `height` | `1920`, `1080` | Picture size. |
 | `fov` | `70` | Default field of view in degrees. Cameras can override it with `/dailycam fov`; with the client helper, new placements use the player's FOV. |
 | `renderDistance` | `16` | View distance in chunks (2–32), like Minecraft's own setting. See [Performance](performance.md#render-distance). |
