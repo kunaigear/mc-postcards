@@ -2,7 +2,7 @@ package io.github.kunaigear.dailycams.render;
 
 import io.github.kunaigear.dailycams.DailyCams;
 import io.github.kunaigear.dailycams.mixin.ChunkMapInvoker;
-import net.minecraft.core.BlockPos;
+import de.tomalbrc.cameraobscura.renderer.ChunkMeshCache;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.FluidTags;
@@ -10,14 +10,13 @@ import net.minecraft.util.Mth;
 import net.minecraft.util.SimpleBitStorage;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.biome.Biome;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.chunk.storage.SerializableChunkData;
 import net.minecraft.world.level.levelgen.Heightmap;
-import net.minecraft.world.level.material.MapColor;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayDeque;
@@ -29,47 +28,62 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Distant terrain as a height map, in the spirit of Voxy and Distant Horizons: for every block column beyond the
- * normal render distance, the height of its top block, that block's colour and whether it's water. Built from the
- * chunks the server has saved to disk (without loading them into the world), so it covers everything that was ever
- * explored. Drawn by tracing rays through it; a pyramid of maximum heights lets rays skip empty space quickly.
+ * Distant terrain, the way Voxy keeps it: the real blocks of each chunk (the saved chunk sections around the
+ * surface, with their sky and block light), read from the chunks the server has saved to disk without loading them
+ * into the world. Rays first skip empty air quickly with a pyramid of column heights, then walk block by block near
+ * the surface. Blocks are drawn with their baked models ({@link LodBlocks}), so leaves and plants are partly
+ * see-through, and rays go on through water to the ground beneath.
  */
 final class LodTerrain {
     static final short UNKNOWN = Short.MIN_VALUE;
-    static final byte WATER = 1, FOLIAGE = 2;
     private static final int MAX_LEVEL = 6;
     private static final int IN_FLIGHT = 24;
+    /** How far a ray follows water downwards before calling it deep. */
+    private static final int MAX_WATER_STEPS = 48;
 
-    final int minX, minZ, sizeX, sizeZ;
-    /** Y of the top block of each column (water counts), or UNKNOWN. */
+    final int minX, minZ, sizeX, sizeZ, minCx, minCz, chunksX, chunksZ;
+    private final int minY, minSection;
+    /** Y of the highest non-air block of each column, or UNKNOWN. */
     final short[] height;
-    /** For water: Y of the top block under the water. */
-    final short[] floor;
-    /** sRGB colour of the top block (for water: the water's colour), and of the ground under water. */
-    final int[] color, floorColor;
-    final byte[] flags;
     private final short[][] maxHeight = new short[MAX_LEVEL + 1][];
     private final int[] levelX = new int[MAX_LEVEL + 1], levelZ = new int[MAX_LEVEL + 1];
+    /** Per chunk: the kept sections (index = section - lowSection[chunk]) and their light. */
+    private final LevelChunkSection[][] sections;
+    private final DataLayer[][] skyLight, blockLight;
+    private final int[] lowSection;
+    private final BlockState fallback;
+    final ServerLevel level;
+    final ChunkMeshCache.FastBlockGetter getter;
     int chunks;
+    /** The highest block anywhere in the distant terrain. */
+    int maxTop = Integer.MIN_VALUE;
 
-    private LodTerrain(int minX, int minZ, int sizeX, int sizeZ) {
-        this.minX = minX;
-        this.minZ = minZ;
-        this.sizeX = sizeX;
-        this.sizeZ = sizeZ;
-        int n = sizeX * sizeZ;
-        height = new short[n];
-        floor = new short[n];
-        color = new int[n];
-        floorColor = new int[n];
-        flags = new byte[n];
+    private LodTerrain(ServerLevel level, int minCx, int minCz, int chunksX, int chunksZ) {
+        this.level = level;
+        this.minCx = minCx;
+        this.minCz = minCz;
+        this.chunksX = chunksX;
+        this.chunksZ = chunksZ;
+        this.minX = minCx * 16;
+        this.minZ = minCz * 16;
+        this.sizeX = chunksX * 16;
+        this.sizeZ = chunksZ * 16;
+        this.minY = level.getMinY();
+        this.minSection = level.getMinSectionY();
+        height = new short[sizeX * sizeZ];
         Arrays.fill(height, UNKNOWN);
+        int n = chunksX * chunksZ;
+        sections = new LevelChunkSection[n][];
+        skyLight = new DataLayer[n][];
+        blockLight = new DataLayer[n][];
+        lowSection = new int[n];
+        fallback = net.minecraft.world.level.block.Blocks.STONE.defaultBlockState();
+        getter = new ChunkMeshCache.FastBlockGetter(level);
     }
 
     /**
      * Reads the saved chunks in the camera's view between {@code near} and {@code far} blocks. Runs on the render
      * thread; reads go through the server's chunk IO, a few at a time, and wait while the server is busy.
-     * Returns null if there's nothing to draw.
      */
     static @Nullable LodTerrain build(ServerLevel level, double camX, double camZ, float yaw, double horizontalFov,
                                       double near, double far) {
@@ -94,7 +108,7 @@ final class LodTerrain {
         if (wanted.isEmpty()) return null;
         wanted.sort((a, b) -> Integer.compare(dist2(a, ccx, ccz), dist2(b, ccx, ccz)));
 
-        LodTerrain lod = new LodTerrain(minCx * 16, minCz * 16, (maxCx - minCx + 1) * 16, (maxCz - minCz + 1) * 16);
+        LodTerrain lod = new LodTerrain(level, minCx, minCz, maxCx - minCx + 1, maxCz - minCz + 1);
         ChunkMapInvoker storage = (ChunkMapInvoker) level.getChunkSource().chunkMap;
         Deque<CompletableFuture<Optional<CompoundTag>>> inFlight = new ArrayDeque<>();
         Deque<ChunkPos> inFlightPos = new ArrayDeque<>();
@@ -114,7 +128,7 @@ final class LodTerrain {
             ChunkPos p = inFlightPos.poll();
             try {
                 Optional<CompoundTag> tag = f.join();
-                if (tag.isPresent()) lod.add(level, p, tag.get());
+                if (tag.isPresent()) lod.add(p, tag.get());
             } catch (Exception e) {
                 // A chunk that can't be read or parsed is simply left out.
             }
@@ -139,78 +153,100 @@ final class LodTerrain {
         }
     }
 
-    private void add(ServerLevel level, ChunkPos pos, CompoundTag tag) {
+    private void add(ChunkPos pos, CompoundTag tag) {
         SerializableChunkData data = SerializableChunkData.parse(level, level.palettedContainerFactory(), tag);
         if (!data.chunkStatus().isOrAfter(ChunkStatus.FULL)) return; // still being generated: no proper surface yet
-        long[] top = data.heightmaps().get(Heightmap.Types.MOTION_BLOCKING);
-        long[] bottom = data.heightmaps().get(Heightmap.Types.OCEAN_FLOOR);
+        long[] top = data.heightmaps().get(Heightmap.Types.WORLD_SURFACE);
+        long[] floor = data.heightmaps().get(Heightmap.Types.OCEAN_FLOOR);
         if (top == null) return;
-        int bits = Mth.ceillog2(level.getHeight() + 1), minY = level.getMinY();
+        int bits = Mth.ceillog2(level.getHeight() + 1);
         SimpleBitStorage topStorage = new SimpleBitStorage(bits, 256, top);
-        SimpleBitStorage bottomStorage = bottom != null ? new SimpleBitStorage(bits, 256, bottom) : null;
-        LevelChunkSection[] sections = new LevelChunkSection[level.getSectionsCount()];
-        for (SerializableChunkData.SectionData s : data.sectionData()) {
-            int index = s.y() - level.getMinSectionY();
-            if (index >= 0 && index < sections.length && s.chunkSection() != null) sections[index] = s.chunkSection();
-        }
-        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        SimpleBitStorage floorStorage = floor != null ? new SimpleBitStorage(bits, 256, floor) : null;
+        int lowY = Integer.MAX_VALUE, highY = Integer.MIN_VALUE;
+        int ci = (pos.x() - minCx) + (pos.z() - minCz) * chunksX;
         for (int z = 0; z < 16; z++) {
             for (int x = 0; x < 16; x++) {
-                int topY = topStorage.get(x + z * 16) - 1 + minY;
-                if (topY < minY) continue;
-                BlockState state = blockAt(sections, level, x, topY, z);
-                if (state == null || state.isAir()) continue;
-                int wx = pos.getMinBlockX() + x, wz = pos.getMinBlockZ() + z;
-                int i = (wz - minZ) * sizeX + (wx - minX);
-                Biome biome = biomeAt(sections, level, x, topY, z);
-                height[i] = (short) topY;
-                cursor.set(wx, topY, wz);
-                if (state.getFluidState().is(FluidTags.WATER)) {
-                    flags[i] = WATER;
-                    color[i] = biome != null ? biome.getWaterColor() : 0x3F76E4;
-                    int floorY = bottomStorage != null ? bottomStorage.get(x + z * 16) - 1 + minY : topY - 8;
-                    floor[i] = (short) floorY;
-                    BlockState ground = blockAt(sections, level, x, floorY, z);
-                    floorColor[i] = ground != null ? colorOf(ground, biome, wx, wz, level, cursor.set(wx, floorY, wz)) : 0x806040;
-                } else {
-                    if (state.getBlock() instanceof LeavesBlock) flags[i] = FOLIAGE;
-                    color[i] = colorOf(state, biome, wx, wz, level, cursor);
-                }
+                int t = topStorage.get(x + z * 16) - 1 + minY;
+                int f = floorStorage != null ? floorStorage.get(x + z * 16) - 1 + minY : t - 16;
+                if (t < minY) continue;
+                height[(pos.getMinBlockZ() + z - minZ) * sizeX + (pos.getMinBlockX() + x - minX)] = (short) t;
+                highY = Math.max(highY, t);
+                lowY = Math.min(lowY, Math.min(t, f) - 6);
             }
         }
+        if (highY == Integer.MIN_VALUE) return;
+        maxTop = Math.max(maxTop, highY);
+        // Keep the sections from a little below the lowest ground up to the highest block.
+        int low = Math.max(minSection, lowY >> 4), high = (highY >> 4);
+        LevelChunkSection[] keep = new LevelChunkSection[high - low + 1];
+        DataLayer[] sky = new DataLayer[keep.length], blk = new DataLayer[keep.length];
+        for (SerializableChunkData.SectionData s : data.sectionData()) {
+            int i = s.y() - low;
+            if (i < 0 || i >= keep.length) continue;
+            keep[i] = s.chunkSection();
+            sky[i] = s.skyLight();
+            blk[i] = s.blockLight();
+        }
+        sections[ci] = keep;
+        skyLight[ci] = sky;
+        blockLight[ci] = blk;
+        lowSection[ci] = low;
         chunks++;
     }
 
-    private static @Nullable BlockState blockAt(LevelChunkSection[] sections, ServerLevel level, int x, int y, int z) {
-        int index = (y >> 4) - level.getMinSectionY();
-        if (index < 0 || index >= sections.length || sections[index] == null) return null;
-        return sections[index].getBlockState(x, y & 15, z);
+    /** Block at a position: null where nothing is known (outside the map), stone below what's kept. */
+    @Nullable BlockState blockAt(int x, int y, int z) {
+        int cx = (x >> 4) - minCx, cz = (z >> 4) - minCz;
+        if (cx < 0 || cz < 0 || cx >= chunksX || cz >= chunksZ) return null;
+        int ci = cx + cz * chunksX;
+        LevelChunkSection[] s = sections[ci];
+        if (s == null) return null;
+        int i = (y >> 4) - lowSection[ci];
+        if (i < 0) return fallback;
+        if (i >= s.length) return net.minecraft.world.level.block.Blocks.AIR.defaultBlockState();
+        LevelChunkSection sec = s[i];
+        return sec == null ? net.minecraft.world.level.block.Blocks.AIR.defaultBlockState() : sec.getBlockState(x & 15, y & 15, z & 15);
     }
 
-    private static @Nullable Biome biomeAt(LevelChunkSection[] sections, ServerLevel level, int x, int y, int z) {
-        int index = (y >> 4) - level.getMinSectionY();
-        if (index < 0 || index >= sections.length || sections[index] == null) return null;
-        return sections[index].getNoiseBiome(x >> 2, (y & 15) >> 2, z >> 2).value();
+    /** Saved sky light (0-15) at a position. Where none was saved: 15 above the column's top, else 0. */
+    int skyAt(int x, int y, int z) {
+        DataLayer l = layer(skyLight, x, y, z);
+        if (l != null && !l.isEmpty()) return l.get(x & 15, y & 15, z & 15);
+        return y > topAt(x, z) ? 15 : 0;
     }
 
-    /** Roughly the average colour of the block's top as it appears in game (biome tints included). */
-    private static int colorOf(BlockState state, @Nullable Biome biome, int x, int z, ServerLevel level, BlockPos pos) {
-        if (biome != null) {
-            if (state.is(Blocks.GRASS_BLOCK)) return scale(biome.getGrassColor(x, z), 0.62);
-            if (state.getBlock() instanceof LeavesBlock && state.getMapColor(level, pos) == MapColor.PLANT) {
-                return scale(biome.getFoliageColor(), 0.55);
-            }
-        }
-        MapColor map = state.getMapColor(level, pos);
-        return map == MapColor.NONE ? 0x808080 : scale(map.col, 0.86);
+    int blockLightAt(int x, int y, int z) {
+        DataLayer l = layer(blockLight, x, y, z);
+        return l != null ? l.get(x & 15, y & 15, z & 15) : 0;
     }
 
-    private static int scale(int rgb, double k) {
-        int r = (int) (((rgb >> 16) & 255) * k), g = (int) (((rgb >> 8) & 255) * k), b = (int) ((rgb & 255) * k);
-        return r << 16 | g << 8 | b;
+    private @Nullable DataLayer layer(DataLayer[][] layers, int x, int y, int z) {
+        int cx = (x >> 4) - minCx, cz = (z >> 4) - minCz;
+        if (cx < 0 || cz < 0 || cx >= chunksX || cz >= chunksZ) return null;
+        int ci = cx + cz * chunksX;
+        DataLayer[] ls = layers[ci];
+        if (ls == null) return null;
+        int i = (y >> 4) - lowSection[ci];
+        return i >= 0 && i < ls.length ? ls[i] : null;
     }
 
-    /** Maximum heights over 2x2, 4x4 ... 64x64 blocks, for skipping empty space. */
+    @Nullable Biome biomeAt(int x, int y, int z) {
+        int cx = (x >> 4) - minCx, cz = (z >> 4) - minCz;
+        if (cx < 0 || cz < 0 || cx >= chunksX || cz >= chunksZ) return null;
+        int ci = cx + cz * chunksX;
+        LevelChunkSection[] s = sections[ci];
+        if (s == null) return null;
+        int i = Math.clamp((y >> 4) - lowSection[ci], 0, s.length - 1);
+        LevelChunkSection sec = s[i];
+        return sec == null ? null : sec.getNoiseBiome((x & 15) >> 2, (y & 15) >> 2, (z & 15) >> 2).value();
+    }
+
+    int topAt(int x, int z) {
+        int bx = x - minX, bz = z - minZ;
+        if (bx < 0 || bz < 0 || bx >= sizeX || bz >= sizeZ) return UNKNOWN;
+        return height[bz * sizeX + bx];
+    }
+
     private void buildPyramid() {
         maxHeight[0] = height;
         levelX[0] = sizeX;
@@ -237,18 +273,27 @@ final class LodTerrain {
         }
     }
 
-    /** Where a ray hits the terrain. */
+    /** Where a ray hits a block, and the water it went through first (if any). */
     static final class Hit {
         double t;
-        int index;
-        double nx, ny, nz;
+        int x, y, z, face;
+        double nx, ny, nz, a, b;
+        BlockState state;
+        LodBlocks.Baked baked;
+        /** Position of the air (or water) block in front of the face, for light and corner shading. */
+        int fx, fy, fz;
+        boolean water, deep;
+        double waterT;
+        int waterX, waterY, waterZ;
     }
 
     /**
-     * Traces a ray from {@code o} along unit vector {@code d} between distances t0 and t1. Fills {@code hit} and
-     * returns true on a hit. Columns are solid from the bottom of the world up to the top of their top block.
+     * Traces a ray from {@code o} along unit vector {@code d} between distances t0 and t1. Returns true when it hits
+     * a block (or deep water: {@code hit.deep}).
      */
     boolean trace(double ox, double oy, double oz, double dx, double dy, double dz, double t0, double t1, Hit hit) {
+        hit.water = false;
+        hit.deep = false;
         double t = t0;
         int lvl = MAX_LEVEL;
         int lastAxis = -1;
@@ -256,7 +301,6 @@ final class LodTerrain {
             double px = ox + dx * t, pz = oz + dz * t;
             int bx = Mth.floor(px) - minX, bz = Mth.floor(pz) - minZ;
             if (bx < 0 || bz < 0 || bx >= sizeX || bz >= sizeZ) {
-                // Outside the map: only continue if the ray is still heading towards it.
                 if ((bx < 0 && dx <= 0) || (bx >= sizeX && dx >= 0) || (bz < 0 && dz <= 0) || (bz >= sizeZ && dz >= 0)) return false;
             }
             int size = 1 << lvl;
@@ -279,20 +323,145 @@ final class LodTerrain {
                 lvl--;
                 continue;
             }
-            // A block column: hit its side if the ray enters below its top, else its top.
+            // Near the surface: walk block by block until the ray hits something or rises above everything again.
             double yNow = oy + dy * t;
-            hit.index = bz * sizeX + bx;
-            if (yNow < surface) {
-                hit.t = t;
-                if (lastAxis == 0) { hit.nx = -Math.signum(dx); hit.ny = 0; hit.nz = 0; }
-                else if (lastAxis == 2) { hit.nx = 0; hit.ny = 0; hit.nz = -Math.signum(dz); }
-                else { hit.nx = 0; hit.ny = 1; hit.nz = 0; }
-            } else {
-                hit.t = (surface - oy) / dy;
-                hit.nx = 0; hit.ny = 1; hit.nz = 0;
-            }
-            return true;
+            if (yNow >= surface && dy < 0) t = Math.max(t, (surface - oy) / dy - 1e-4);
+            int r = walk(ox, oy, oz, dx, dy, dz, t, t1, lastAxis, hit);
+            if (r > 0) return true;
+            if (r < 0) return false;
+            t = hit.t + 1e-4;
+            lastAxis = -1;
         }
         return false;
+    }
+
+    /** Block-by-block walk (Amanatides-Woo). 1 = hit, 0 = left the surface (hit.t = where), -1 = past t1. */
+    private int walk(double ox, double oy, double oz, double dx, double dy, double dz, double t, double t1, int lastAxis, Hit hit) {
+        double px = ox + dx * t, py = oy + dy * t, pz = oz + dz * t;
+        int x = Mth.floor(px), y = Mth.floor(py), z = Mth.floor(pz);
+        int stepX = dx > 0 ? 1 : -1, stepY = dy > 0 ? 1 : -1, stepZ = dz > 0 ? 1 : -1;
+        double tDeltaX = dx == 0 ? Double.POSITIVE_INFINITY : Math.abs(1 / dx);
+        double tDeltaY = dy == 0 ? Double.POSITIVE_INFINITY : Math.abs(1 / dy);
+        double tDeltaZ = dz == 0 ? Double.POSITIVE_INFINITY : Math.abs(1 / dz);
+        double tMaxX = dx == 0 ? Double.POSITIVE_INFINITY : t + ((dx > 0 ? x + 1 - px : px - x) * tDeltaX);
+        double tMaxY = dy == 0 ? Double.POSITIVE_INFINITY : t + ((dy > 0 ? y + 1 - py : py - y) * tDeltaY);
+        double tMaxZ = dz == 0 ? Double.POSITIVE_INFINITY : t + ((dz > 0 ? z + 1 - pz : pz - z) * tDeltaZ);
+        int axis = lastAxis < 0 ? dominantAxis(dx, dy, dz) : lastAxis;
+        double tEnter = t;
+        int waterSteps = 0;
+        for (int i = 0; i < 1024; i++) {
+            if (tEnter > t1) return -1;
+            int top = topAt(x, z);
+            if (top == UNKNOWN) {
+                hit.t = tEnter;
+                return 0; // nothing known here; the fast skipping handles leaving the map
+            }
+            // Above everything in this column: hand back to the fast skipping (not right at the start, where the
+            // ray may sit exactly on the surface it's about to go below).
+            if (y > top && i > 0 && (dy >= 0 || y > top + 2)) {
+                hit.t = tEnter;
+                return 0;
+            }
+            BlockState state = y > top ? null : blockAt(x, y, z);
+            if (state != null && !state.isAir()) {
+                boolean isWater = state.getFluidState().is(FluidTags.WATER) && !state.canOcclude();
+                if (isWater) {
+                    if (!hit.water) {
+                        hit.water = true;
+                        hit.waterT = tEnter;
+                        hit.waterX = x; hit.waterY = y; hit.waterZ = z;
+                    }
+                    if (++waterSteps > MAX_WATER_STEPS) {
+                        hit.deep = true;
+                        hit.t = tEnter;
+                        return 1;
+                    }
+                }
+                if (!isWater || !(state.getBlock() instanceof net.minecraft.world.level.block.LiquidBlock)) {
+                    LodBlocks.Baked baked = LodBlocks.get(state, getter);
+                    if (!baked.empty) {
+                        int face = faceFor(axis, stepX, stepY, stepZ);
+                        double hx = ox + dx * tEnter, hy = oy + dy * tEnter, hz = oz + dz * tEnter;
+                        double a, b;
+                        switch (face) {
+                            case 0, 1 -> { a = frac(hz); b = frac(hy); }
+                            case 2, 3 -> { a = frac(hx); b = frac(hz); }
+                            default -> { a = frac(hx); b = frac(hy); }
+                        }
+                        if (LodBlocks.coverage(baked, face, a, b) >= 0.5f) {
+                            hit.t = tEnter;
+                            hit.x = x; hit.y = y; hit.z = z;
+                            hit.face = face;
+                            hit.nx = LodBlocks.NORMALS[face][0]; hit.ny = LodBlocks.NORMALS[face][1]; hit.nz = LodBlocks.NORMALS[face][2];
+                            hit.a = a; hit.b = b;
+                            hit.state = state;
+                            hit.baked = baked;
+                            hit.fx = x + LodBlocks.NORMALS[face][0]; hit.fy = y + LodBlocks.NORMALS[face][1]; hit.fz = z + LodBlocks.NORMALS[face][2];
+                            return 1;
+                        }
+                    }
+                }
+            }
+            // Next block.
+            if (tMaxX < tMaxY && tMaxX < tMaxZ) { x += stepX; tEnter = tMaxX; tMaxX += tDeltaX; axis = 0; }
+            else if (tMaxY < tMaxZ) { y += stepY; tEnter = tMaxY; tMaxY += tDeltaY; axis = 1; }
+            else { z += stepZ; tEnter = tMaxZ; tMaxZ += tDeltaZ; axis = 2; }
+            if (y < minY) return -1;
+        }
+        hit.t = tEnter;
+        return 0;
+    }
+
+    private static int dominantAxis(double dx, double dy, double dz) {
+        double ax = Math.abs(dx), ay = Math.abs(dy), az = Math.abs(dz);
+        return ax >= ay && ax >= az ? 0 : ay >= az ? 1 : 2;
+    }
+
+    /** The face a ray moving in this direction enters a block through. */
+    private static int faceFor(int axis, int stepX, int stepY, int stepZ) {
+        return switch (axis) {
+            case 0 -> stepX > 0 ? 1 : 0;
+            case 1 -> stepY > 0 ? 3 : 2;
+            default -> stepZ > 0 ? 5 : 4;
+        };
+    }
+
+    private static double frac(double v) {
+        return v - Math.floor(v);
+    }
+
+    /** Whether a block darkens the corners next to it, like vanilla smooth lighting. */
+    private boolean occludes(int x, int y, int z) {
+        BlockState s = blockAt(x, y, z);
+        return s != null && s.canOcclude();
+    }
+
+    /**
+     * Vanilla-style ambient occlusion on the hit face: each corner is darkened by the blocks touching it, and the
+     * hit point blends the four corners. 1 = open, down to 0.4.
+     */
+    double ambientOcclusion(Hit hit) {
+        int[] n = LodBlocks.NORMALS[hit.face];
+        // In-face axes matching (a, b): X faces (z, y), Y faces (x, z), Z faces (x, y).
+        int[] ua = n[0] != 0 ? new int[]{0, 0, 1} : new int[]{1, 0, 0};
+        int[] ub = n[1] != 0 ? new int[]{0, 0, 1} : new int[]{0, 1, 0};
+        double c00 = corner(hit, ua, ub, -1, -1), c10 = corner(hit, ua, ub, 1, -1);
+        double c01 = corner(hit, ua, ub, -1, 1), c11 = corner(hit, ua, ub, 1, 1);
+        double a = hit.a, b = hit.b;
+        return (c00 * (1 - a) + c10 * a) * (1 - b) + (c01 * (1 - a) + c11 * a) * b;
+    }
+
+    private double corner(Hit hit, int[] ua, int[] ub, int sa, int sb) {
+        int fx = hit.fx, fy = hit.fy, fz = hit.fz;
+        boolean s1 = occludes(fx + ua[0] * sa, fy + ua[1] * sa, fz + ua[2] * sa);
+        boolean s2 = occludes(fx + ub[0] * sb, fy + ub[1] * sb, fz + ub[2] * sb);
+        if (s1 && s2) return 0.4;
+        boolean c = occludes(fx + ua[0] * sa + ub[0] * sb, fy + ua[1] * sa + ub[1] * sb, fz + ua[2] * sa + ub[2] * sb);
+        return 1 - 0.2 * ((s1 ? 1 : 0) + (s2 ? 1 : 0) + (c ? 1 : 0));
+    }
+
+    static boolean isFoliage(BlockState s) {
+        return s.getBlock() instanceof LeavesBlock || s.is(net.minecraft.tags.BlockTags.REPLACEABLE)
+                || s.is(net.minecraft.tags.BlockTags.FLOWERS);
     }
 }

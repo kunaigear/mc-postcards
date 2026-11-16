@@ -124,7 +124,7 @@ final class CameraRenderer {
                 if (gbuffer != null) {
                     RealisticShader.apply(image, renderer.frame(), gbuffer, level, s.realistic(), lod, s.lodDistance());
                 } else {
-                    if (lod != null) LodSimple.apply(image, renderer.frame(), lod, level, s.simple(), s.lodDistance());
+                    if (lod != null) LodSimple.apply(image, renderer.frame(), lod, level, s.simple(), !"none".equals(s.shader()), s.lodDistance());
                     if (!"none".equals(s.shader())) SimpleShader.apply(image, renderer.frame(), level, s.simple());
                 }
                 shadeMs = (System.nanoTime() - shadeStart) / 1_000_000;

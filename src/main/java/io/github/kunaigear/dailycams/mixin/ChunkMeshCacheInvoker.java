@@ -11,4 +11,11 @@ public interface ChunkMeshCacheInvoker {
     static void dailycams$rebuildChunk(Level level, ChunkMeshCache.ChunkMesh mesh) {
         throw new AssertionError();
     }
+
+    /** The block model Camera Obscura uses for a block state (for baking distant terrain). */
+    @Invoker("getModelViewForState")
+    static java.util.List<de.tomalbrc.cameraobscura.model.resource.RPModel.View> dailycams$getModelViewForState(
+            net.minecraft.world.level.BlockGetter level, int x, int y, int z, net.minecraft.world.level.block.state.BlockState state) {
+        throw new AssertionError();
+    }
 }
