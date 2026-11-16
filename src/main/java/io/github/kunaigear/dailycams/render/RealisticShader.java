@@ -27,7 +27,8 @@ import java.awt.image.DataBufferInt;
  *   <li>a physically based sky ({@link Atmosphere}) with sun, moon, stars and procedural clouds that change daily,</li>
  *   <li>sunlight coloured by the atmosphere, with soft voxel shadows, cloud shadows and light through leaves,</li>
  *   <li>leaves that glow when backlit, with a sheen; plants lit like the ground they grow on,</li>
- *   <li>sky light from the actual sky colour, warm block light and a light floor, so nothing is pitch black,</li>
+ *   <li>sky light from the actual sky colour, weakened by screen-space ambient occlusion, warm block light and a
+ *   light floor, so nothing is pitch black,</li>
  *   <li>water with sky reflections, sun glints and depth-based absorption,</li>
  *   <li>aerial perspective, automatic exposure, bloom and AgX filmic tone mapping.</li>
  * </ul>
@@ -37,6 +38,9 @@ final class RealisticShader {
     private RealisticShader() {}
 
     private static final int MAX_SHADOW_STEPS = 200;
+    /** Reach (blocks) and samples of the screen-space ambient occlusion. */
+    private static final double AO_RADIUS = 3.5;
+    private static final int AO_SAMPLES = 8;
     /** Light that gets through one leaf block. */
     private static final double LEAF_TRANSMITTANCE = 0.5;
     /** The layer of cumulus clouds, in blocks above sea level. */
@@ -138,6 +142,7 @@ final class RealisticShader {
         // Pass 2: soften the shadows (depth-aware blur), so edges look like a real sun's penumbra.
         int radius = (int) Math.round(Math.max(1, w / 1300.0) * st.shadowSoftness);
         if (radius > 0) shadow = softenShadows(shadow, dist, w, h, radius);
+        float[] occlusion = ambientOcclusion(dist, vdx, vdy, vdz, gb, mat, w, h, f.sampleAngle() * scale);
 
         // Clouds behind everything that isn't solid near terrain, at half resolution (they're soft anyway).
         sky.prepareClouds(f, w, h, dist, depth, fbW, scale, fadeEnd * 0.55);
@@ -259,7 +264,7 @@ final class RealisticShader {
                     double ox = cam.x + d[0] * dist[i], oy = cam.y + d[1] * dist[i], oz = cam.z + d[2] * dist[i];
                     double sun = shadow[i];
                     if (water && sun > 0) sun *= caustics(ox, oz, wy - oy, lx, ly, lz);
-                    shadeOpaque(gb, i, mat[i], d, ox, oy, oz, toLinear(ar), toLinear(ag), toLinear(ab), sun, atm, sky, st,
+                    shadeOpaque(gb, i, mat[i], occlusion[i], d, ox, oy, oz, toLinear(ar), toLinear(ag), toLinear(ab), sun, atm, sky, st,
                             blocks, cursor, lx, ly, lz, lightIrr, lightUp, translucent, amb, opq);
                     surfDist = dist[i];
                 } else {
@@ -439,7 +444,7 @@ final class RealisticShader {
     }
 
     /** Direct light, sky light, block light and a light floor on an opaque surface. */
-    private static void shadeOpaque(GBuffer gb, int i, int material, double[] d, double ox, double oy, double oz,
+    private static void shadeOpaque(GBuffer gb, int i, int material, double occlusion, double[] d, double ox, double oy, double oz,
                                     double ar, double ag, double ab, double shadow, Atmosphere atm, Sky sky,
                                     DailyCamsConfig.RealisticSettings st, ChunkMeshCache.FastBlockGetter blocks,
                                     BlockPos.MutableBlockPos cursor, double lx, double ly, double lz, double[] lightIrr,
@@ -447,7 +452,8 @@ final class RealisticShader {
         int np = gb.normal[i], lp = gb.light[i];
         double nx = GBuffer.nx(np), ny = GBuffer.ny(np), nz = GBuffer.nz(np);
         if (nx * d[0] + ny * d[1] + nz * d[2] > 0) { nx = -nx; ny = -ny; nz = -nz; } // two-sided plants
-        double skyL = GBuffer.sky(lp), blockL = GBuffer.block(lp), ao = GBuffer.ao(lp);
+        // Minecraft's corner shading and the screen-space occlusion both darken corners: keep the darker, not both.
+        double skyL = GBuffer.sky(lp), blockL = GBuffer.block(lp), ao = Math.min(GBuffer.ao(lp), occlusion);
         BlockState state = blocks.getBlockState(cursor.set(Mth.floor(ox - nx * 0.02), Mth.floor(oy - ny * 0.02), Mth.floor(oz - nz * 0.02)));
         lightSurface(d, nx, ny, nz, ar, ag, ab, skyL, blockL, ao, shadow, material, state.getLightEmission() / 15.0,
                 covered, ox, oy, oz, atm, sky, st, lightIrr, lx, ly, lz, lightUp, amb, out);
@@ -717,6 +723,83 @@ final class RealisticShader {
             }
         }
         return t;
+    }
+
+    /**
+     * Screen-space ambient occlusion (after Alchemy AO), at half resolution: how much of the hemisphere above each
+     * surface the geometry around it on screen covers, within {@link #AO_RADIUS} blocks. 1 = open, also where
+     * there's no surface. Darkens canopy interiors, plants and the ground under trees, which Minecraft's corner
+     * shading leaves alone.
+     */
+    private static float[] ambientOcclusion(float[] dist, float[] vdx, float[] vdy, float[] vdz, GBuffer gb, byte[] mat,
+                                            int w, int h, double pixelAngle) {
+        int hw = Math.max(1, w / 2), hh = Math.max(1, h / 2), m = hw * hh;
+        float[] hd = new float[m], px = new float[m], py = new float[m], pz = new float[m], nx = new float[m], ny = new float[m], nz = new float[m];
+        for (int y = 0; y < hh; y++) {
+            for (int x = 0; x < hw; x++) {
+                int j = y * hw + x, i = Math.min(h - 1, y * 2) * w + Math.min(w - 1, x * 2);
+                float d = dist[i];
+                hd[j] = d;
+                if (!Float.isFinite(d)) continue;
+                px[j] = vdx[i] * d; py[j] = vdy[i] * d; pz[j] = vdz[i] * d;
+                if (mat[i] == PLANT) { ny[j] = 1; continue; }
+                int np = gb.normal[i];
+                double sx = GBuffer.nx(np), sy = GBuffer.ny(np), sz = GBuffer.nz(np);
+                double flip = sx * vdx[i] + sy * vdy[i] + sz * vdz[i] > 0 ? -1 : 1;
+                nx[j] = (float) (sx * flip); ny[j] = (float) (sy * flip); nz[j] = (float) (sz * flip);
+            }
+        }
+        float[] ao = new float[m];
+        double r2 = AO_RADIUS * AO_RADIUS;
+        for (int y = 0; y < hh; y++) {
+            Throttle.checkpoint();
+            for (int x = 0; x < hw; x++) {
+                int j = y * hw + x;
+                if (!Float.isFinite(hd[j])) { ao[j] = 1; continue; }
+                double radius = Math.clamp(AO_RADIUS / (hd[j] * pixelAngle * 2), 1.5, 40);
+                // A different rotation of the sample spiral for each pixel of a 4x4 tile; the blur averages them.
+                double rot = ((x & 3) * 4 + (y & 3)) * (Math.PI * 2 / 16);
+                double sum = 0;
+                for (int k = 0; k < AO_SAMPLES; k++) {
+                    double a = rot + k * 2.399963, rr = radius * Math.sqrt((k + 0.5) / AO_SAMPLES);
+                    int sx = x + (int) Math.round(Math.cos(a) * rr), sy = y + (int) Math.round(Math.sin(a) * rr);
+                    if (sx < 0 || sy < 0 || sx >= hw || sy >= hh) continue;
+                    int s = sy * hw + sx;
+                    if (!Float.isFinite(hd[s])) continue;
+                    double vx = px[s] - px[j], vy = py[s] - py[j], vz = pz[s] - pz[j], vv = vx * vx + vy * vy + vz * vz;
+                    if (vv < 1e-6 || vv > r2) continue;
+                    double cos = (vx * nx[j] + vy * ny[j] + vz * nz[j]) / Math.sqrt(vv);
+                    sum += Math.max(0, cos - 0.1) * (1 - vv / r2);
+                }
+                ao[j] = (float) Math.max(0.4, 1 - 2.0 * sum / AO_SAMPLES);
+            }
+        }
+        ao = softenShadows(ao, hd, hw, hh, 2);
+        // Back to full resolution, from the half-resolution neighbours at a similar distance.
+        float[] out = new float[w * h];
+        for (int y = 0; y < h; y++) {
+            Throttle.checkpoint();
+            for (int x = 0; x < w; x++) {
+                int i = y * w + x;
+                float d = dist[i];
+                if (!Float.isFinite(d)) { out[i] = 1; continue; }
+                double fx = Math.clamp(x / 2.0, 0, hw - 1), fy = Math.clamp(y / 2.0, 0, hh - 1);
+                int x0 = (int) fx, y0 = (int) fy;
+                double sum = 0, wsum = 0;
+                for (int k = 0; k < 4; k++) {
+                    int xx = Math.min(hw - 1, x0 + (k & 1)), yy = Math.min(hh - 1, y0 + (k >> 1));
+                    int s = yy * hw + xx;
+                    if (!Float.isFinite(hd[s])) continue;
+                    double rel = (hd[s] - d) / (0.03 * d + 0.05);
+                    double wt = ((k & 1) == 1 ? fx - x0 : 1 - (fx - x0)) * ((k >> 1) == 1 ? fy - y0 : 1 - (fy - y0)) + 1e-3;
+                    wt *= Math.exp(-rel * rel);
+                    sum += ao[s] * wt;
+                    wsum += wt;
+                }
+                out[i] = wsum > 1e-6 ? (float) (sum / wsum) : 1;
+            }
+        }
+        return out;
     }
 
     /** Separable blur that only mixes pixels at a similar distance, so shadows don't bleed across edges. */
