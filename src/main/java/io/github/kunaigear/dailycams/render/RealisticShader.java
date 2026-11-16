@@ -8,7 +8,10 @@ import net.minecraft.tags.FluidTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.attribute.EnvironmentAttributes;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.LeavesBlock;
+import net.minecraft.world.level.block.MultifaceBlock;
+import net.minecraft.world.level.block.VineBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4d;
@@ -91,6 +94,9 @@ final class RealisticShader {
 
         // Pass 1: positions and shadows for every opaque pixel.
         float[] dist = new float[n], shadow = new float[n], vdx = new float[n], vdy = new float[n], vdz = new float[n];
+        byte[] mat = new byte[n];
+        BlockState lastState = null;
+        int lastMat = SOLID;
         Vector3d tmp = new Vector3d();
         for (int y = 0; y < h; y++) {
             Throttle.checkpoint();
@@ -113,13 +119,15 @@ final class RealisticShader {
                 f.inverseViewProjection().transformProject(tmp);
                 double ox = tmp.x - cam.x, oy = tmp.y - cam.y, oz = tmp.z - cam.z;
                 dist[i] = (float) Math.sqrt(ox * ox + oy * oy + oz * oz);
-                if (lightUp <= 0 || GBuffer.sky(gb.light[i]) <= 0.01) continue;
                 int np = gb.normal[i];
                 double nx = GBuffer.nx(np), ny = GBuffer.ny(np), nz = GBuffer.nz(np);
                 if (nx * vdx[i] + ny * vdy[i] + nz * vdz[i] > 0) { nx = -nx; ny = -ny; nz = -nz; }
-                double ndl = nx * lx + ny * ly + nz * lz;
                 BlockState state = blocks.getBlockState(cursor.set(Mth.floor(tmp.x - nx * 0.02), Mth.floor(tmp.y - ny * 0.02), Mth.floor(tmp.z - nz * 0.02)));
-                if (ndl <= 0 && !isFoliage(state)) continue;
+                if (state != lastState) { lastState = state; lastMat = material(state); }
+                mat[i] = (byte) lastMat;
+                if (lightUp <= 0 || GBuffer.sky(gb.light[i]) <= 0.01) continue;
+                double ndl = nx * lx + ny * ly + nz * lz;
+                if (ndl <= 0 && lastMat == SOLID) continue;
                 shadow[i] = (float) transmittanceToLight(blocks, cursor, tmp.x + nx * 0.03, tmp.y + ny * 0.03, tmp.z + nz * 0.03, lx, ly, lz, maxY);
             }
         }
@@ -248,7 +256,7 @@ final class RealisticShader {
                     double ox = cam.x + d[0] * dist[i], oy = cam.y + d[1] * dist[i], oz = cam.z + d[2] * dist[i];
                     double sun = shadow[i];
                     if (water && sun > 0) sun *= caustics(ox, oz, wy - oy, lx, ly, lz);
-                    shadeOpaque(gb, i, d, ox, oy, oz, toLinear(ar), toLinear(ag), toLinear(ab), sun, atm, sky, st,
+                    shadeOpaque(gb, i, mat[i], d, ox, oy, oz, toLinear(ar), toLinear(ag), toLinear(ab), sun, atm, sky, st,
                             blocks, cursor, lx, ly, lz, lightIrr, lightUp, translucent, amb, opq);
                     surfDist = dist[i];
                 } else {
@@ -397,14 +405,14 @@ final class RealisticShader {
             LodBlocks.sample(hit.baked, hit.face, hit.a, hit.b, mip, tint, alb);
             double skyL = lod.skyAt(hit.fx, hit.fy, hit.fz) / 15.0, blockL = lod.blockLightAt(hit.fx, hit.fy, hit.fz) / 15.0;
             double ao = lod.ambientOcclusion(hit);
-            boolean foliage = LodTerrain.isFoliage(hit.state);
+            int material = material(hit.state);
             double ndl = hit.nx * lx + hit.ny * ly + hit.nz * lz;
             double shadow = 0;
-            if (lightUp > 0 && skyL > 0.01 && (ndl > 0 || foliage)) {
+            if (lightUp > 0 && skyL > 0.01 && (ndl > 0 || material != SOLID)) {
                 boolean blocked = lod.trace(px + hit.nx * 0.01, py + hit.ny * 0.01, pz + hit.nz * 0.01, lx, ly, lz, 0.01, 400, shadowHit);
                 shadow = blocked && !shadowHit.deep ? 0 : 1;
             }
-            lightSurface(d, hit.nx, hit.ny, hit.nz, alb[0], alb[1], alb[2], skyL, blockL, ao, shadow, foliage,
+            lightSurface(d, hit.nx, hit.ny, hit.nz, alb[0], alb[1], alb[2], skyL, blockL, ao, shadow, material,
                     hit.state.getLightEmission() / 15.0, hit.water, px, py, pz, atm, sky, st, lightIrr, lx, ly, lz, lightUp, amb, behind);
         }
         double dist = t;
@@ -428,7 +436,7 @@ final class RealisticShader {
     }
 
     /** Direct light, sky light, block light and a light floor on an opaque surface. */
-    private static void shadeOpaque(GBuffer gb, int i, double[] d, double ox, double oy, double oz,
+    private static void shadeOpaque(GBuffer gb, int i, int material, double[] d, double ox, double oy, double oz,
                                     double ar, double ag, double ab, double shadow, Atmosphere atm, Sky sky,
                                     DailyCamsConfig.RealisticSettings st, ChunkMeshCache.FastBlockGetter blocks,
                                     BlockPos.MutableBlockPos cursor, double lx, double ly, double lz, double[] lightIrr,
@@ -438,7 +446,7 @@ final class RealisticShader {
         if (nx * d[0] + ny * d[1] + nz * d[2] > 0) { nx = -nx; ny = -ny; nz = -nz; } // two-sided plants
         double skyL = GBuffer.sky(lp), blockL = GBuffer.block(lp), ao = GBuffer.ao(lp);
         BlockState state = blocks.getBlockState(cursor.set(Mth.floor(ox - nx * 0.02), Mth.floor(oy - ny * 0.02), Mth.floor(oz - nz * 0.02)));
-        lightSurface(d, nx, ny, nz, ar, ag, ab, skyL, blockL, ao, shadow, isFoliage(state), state.getLightEmission() / 15.0,
+        lightSurface(d, nx, ny, nz, ar, ag, ab, skyL, blockL, ao, shadow, material, state.getLightEmission() / 15.0,
                 covered, ox, oy, oz, atm, sky, st, lightIrr, lx, ly, lz, lightUp, amb, out);
     }
 
@@ -448,17 +456,19 @@ final class RealisticShader {
      * for light sources. Albedo is linear; {@code ao} is 0-1 corner brightness.
      */
     private static void lightSurface(double[] d, double nx, double ny, double nz, double ar, double ag, double ab,
-                                     double skyL, double blockL, double aoRaw, double shadow, boolean foliage,
+                                     double skyL, double blockL, double aoRaw, double shadow, int material,
                                      double emission, boolean covered, double ox, double oy, double oz, Atmosphere atm,
                                      Sky sky, DailyCamsConfig.RealisticSettings st, double[] lightIrr, double lx,
                                      double ly, double lz, double lightUp, double[] amb, double[] out) {
+        // Grass and flowers are crossed quads facing every way: light them like the ground they grow on.
+        if (material == PLANT) { nx = 0; ny = 1; nz = 0; }
         double ao = Math.pow(Math.clamp(aoRaw, 0, 1), 2.0);
         double skyVis = Math.pow(skyL, 2.4) * SHADE;
         atm.ambient(nx, ny, nz, amb);
         double ndl = nx * lx + ny * ly + nz * lz;
-        double diffuse = foliage ? Math.max(0, (ndl + 0.35) / 1.35) : Math.max(0, ndl);
+        double diffuse = material != SOLID ? Math.max(0, (ndl + 0.35) / 1.35) : Math.max(0, ndl);
         double direct = diffuse * shadow * lightUp * (skyL > 0.01 ? sky.cloudShadow(ox, oy, oz) : 0);
-        double back = foliage ? Math.max(0, -ndl) * 0.3 * shadow * lightUp : 0;
+        double back = material != SOLID ? Math.max(0, -ndl) * 0.3 * shadow * lightUp : 0;
         double torch = 2.2 * Math.pow(blockL, 3.2);
         double floor = Math.PI * (st.minLight + 0.1 * sky.dimensionLight);
         // Light sources glow (and bloom), less so seen through water or glass.
@@ -629,9 +639,16 @@ final class RealisticShader {
         }
     }
 
-    private static boolean isFoliage(BlockState state) {
-        return state.getBlock() instanceof LeavesBlock || state.is(BlockTags.REPLACEABLE) || state.is(BlockTags.FLOWERS)
-                || state.is(BlockTags.SAPLINGS) || state.is(BlockTags.CROPS);
+    /** How a surface is lit: solid, leaves (and vines, which keep their normal), or plants (lit with an up normal). */
+    private static final int SOLID = 0, LEAVES = 1, PLANT = 2;
+
+    private static int material(BlockState state) {
+        // Air is in #replaceable too; what's found there is an entity, not a plant.
+        if (state.isAir()) return SOLID;
+        Block block = state.getBlock();
+        if (block instanceof LeavesBlock || block instanceof VineBlock || block instanceof MultifaceBlock) return LEAVES;
+        return state.is(BlockTags.REPLACEABLE) || state.is(BlockTags.FLOWERS) || state.is(BlockTags.SAPLINGS)
+                || state.is(BlockTags.CROPS) ? PLANT : SOLID;
     }
 
     /** Fraction of light reaching a point (voxel walk; leaves let some light through). */
