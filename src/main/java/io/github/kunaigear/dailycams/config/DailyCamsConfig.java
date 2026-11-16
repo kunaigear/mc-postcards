@@ -32,6 +32,11 @@ public final class DailyCamsConfig {
     public String timeZone = "";
     /** If the server was offline at a scheduled time, run as soon as it is up again. */
     public boolean catchUpMissedRuns = true;
+    /**
+     * Start each run at a random time up to 20 minutes after the scheduled one. A Minecraft day lasts 20 minutes,
+     * so the pictures show every time of day equally often instead of the same one every day.
+     */
+    public boolean randomScheduleOffset = false;
 
     public int width = 1920;
     public int height = 1080;

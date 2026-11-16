@@ -8,6 +8,7 @@ A server-side Minecraft Fabric mod: players place virtual cameras with `/dailyca
 - A `config.json` or `cameras.json` with an error is backed up as `<file>.broken-<date>` and no longer overwritten; `/dailycam reload` shows the error and keeps the previous settings and cameras
 - Players in a picture get the skin they joined with. Camera Obscura looked each skin up on Mojang's session server, and when Mojang rate-limited the server (HTTP 429), that player stayed in the default skin until a restart
 - A daily run interrupted by a stop or crash is finished after the restart
+- New `randomScheduleOffset` setting (off by default): each run starts at a random time up to 20 minutes, one Minecraft day, after the scheduled one, so the pictures show every time of day equally often
 - Webhook URLs are shown as scheme and host only, and players no longer see webhook error details (they're in the server log, redacted)
 - Pictures are encoded before they wait for upload, so a slow webhook can't pile up large images in memory
 - Supports 26.3, requires Java 25, Fabric Loader 0.19.5 or newer, Fabric API, Camera Obscura 2.1.4 and Polymer. The client helper needs Fabric API only
