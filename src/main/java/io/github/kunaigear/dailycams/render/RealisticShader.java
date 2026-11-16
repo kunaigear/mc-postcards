@@ -11,6 +11,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import org.joml.Matrix4d;
 import org.joml.Vector3d;
 
 import java.awt.image.BufferedImage;
@@ -32,7 +33,8 @@ final class RealisticShader {
     private RealisticShader() {}
 
     private static final int MAX_SHADOW_STEPS = 200;
-    private static final double CLOUD_ALTITUDE = 900;
+    /** The layer of cumulus clouds, in blocks above sea level. */
+    private static final double CLOUD_BOTTOM = 900, CLOUD_TOP = 1500;
     private static final double[] TORCH = {1.0, 0.56, 0.26};
     private static final double[] FLOOR_TINT = {0.86, 0.93, 1.1};
     /** How much of the sky's light reaches surfaces in shade. Below 1 for deeper, more contrasty shadows. */
@@ -92,11 +94,12 @@ final class RealisticShader {
         Vector3d tmp = new Vector3d();
         for (int y = 0; y < h; y++) {
             Throttle.checkpoint();
-            int fbY = (h - 1 - y) * scale + scale / 2;
-            double ndcY = (fbY + 0.5) / fbH * 2 - 1;
             for (int x = 0; x < w; x++) {
                 int i = y * w + x;
-                int fbX = x * scale + scale / 2;
+                // The sample the G-buffer kept the opaque surface at (the centre one if there is none).
+                int os = gb.hasOpaque(i) ? gb.opaqueSample[i] : gb.centre;
+                int fbX = x * scale + os % scale, fbY = (h - 1 - y) * scale + os / scale;
+                double ndcY = (fbY + 0.5) / fbH * 2 - 1;
                 tmp.set((fbX + 0.5) / fbW * 2 - 1, ndcY, 1.0);
                 f.inverseViewProjection().transformProject(tmp);
                 double vx = tmp.x - cam.x, vy = tmp.y - cam.y, vz = tmp.z - cam.z, vl = Math.sqrt(vx * vx + vy * vy + vz * vz);
@@ -125,17 +128,24 @@ final class RealisticShader {
         int radius = (int) Math.round(Math.max(1, w / 1300.0) * st.shadowSoftness);
         if (radius > 0) shadow = softenShadows(shadow, dist, w, h, radius);
 
+        // Clouds behind everything that isn't solid near terrain, at half resolution (they're soft anyway).
+        sky.prepareClouds(f, w, h, dist, depth, fbW, scale, fadeEnd * 0.55);
+
         // Pass 3: lighting.
         float[] hr = new float[n], hg = new float[n], hb = new float[n];
         boolean[] surface = new boolean[n];
         float[] meter = new float[n];
+        // How much open sky each pixel shows, where the sun's light comes through (for sun rays).
+        float[] open = new float[n];
         double[] c = new double[3], s = new double[3], amb = new double[3], opq = new double[3], haze = new double[3], d = new double[3];
         double[] scratch = new double[3], sd = new double[3], skyC = new double[3], c2 = new double[3], tint = new double[3], lodAlb = new double[3];
         // Angle covered by one supersample, for choosing how detailed distant textures are.
-        int mid = (h / 2) * w + w / 2;
-        double sampleAngle = Math.acos(Math.clamp(vdx[mid] * vdx[mid + 1] + vdy[mid] * vdy[mid + 1] + vdz[mid] * vdz[mid + 1], -1, 1)) / scale;
+        double sampleAngle = f.sampleAngle();
+        // From here on, dist holds the distance to whatever each shaded pixel shows (for reflections).
+        Reflections ssr = new Reflections(f, w, h, hr, hg, hb, dist);
         for (int y = 0; y < h; y++) {
             Throttle.checkpoint();
+            ssr.row = y;
             int fbYBase = (h - 1 - y) * scale;
             for (int x = 0; x < w; x++) {
                 int i = y * w + x;
@@ -153,14 +163,15 @@ final class RealisticShader {
                 // Traced for every background sample of the supersampled block, so its edges are as smooth as the
                 // near terrain's.
                 boolean lodBg = false;
-                double lodMeter = 0;
-                if (bg > 0 || (!opaque && !translucent)) {
+                double lodMeter = 0, lodDist = Double.POSITIVE_INFINITY, skyFrac = 0;
+                if (bg > 0 || !opaque) {
+                    skyFrac = opaque ? bg / (double) samples : 1;
                     if (lod == null) {
-                        sky.radiance(d[0], d[1], d[2], true, s);
+                        sky.background(x, y, d[0], d[1], d[2], s);
                     } else {
                         boolean skyDone = false;
                         int traced = 0, hits = 0;
-                        double sr = 0, sg = 0, sb = 0, msum = 0;
+                        double sr = 0, sg = 0, sb = 0, msum = 0, dsum = 0;
                         for (int sy2 = 0; sy2 < scale; sy2++) {
                             int row = (fbYBase + sy2) * fbW + x * scale;
                             for (int sx2 = 0; sx2 < scale; sx2++) {
@@ -172,12 +183,13 @@ final class RealisticShader {
                                 traced++;
                                 if ((sd[1] <= 0 || cam.y <= lod.maxTop + 1)
                                         && lod.trace(cam.x, cam.y, cam.z, sd[0], sd[1], sd[2], lodStart, lodFar, lodHit)) {
-                                    msum += shadeLod(lod, lodHit, shadowHit, sd, cam, atm, sky, st, lx, ly, lz, lightIrr, lightUp,
-                                            overcast, fadeEnd, sampleAngle, amb, haze, scratch, tint, lodAlb, c2);
+                                    msum += shadeLod(x, y, lod, lodHit, shadowHit, sd, cam, atm, sky, st, lx, ly, lz, lightIrr, lightUp,
+                                            overcast, fadeEnd, sampleAngle, ssr, amb, haze, scratch, tint, lodAlb, c2);
+                                    dsum += lodHit.water ? lodHit.waterT : lodHit.t;
                                     hits++;
                                 } else {
                                     if (!skyDone) {
-                                        sky.radiance(d[0], d[1], d[2], true, skyC);
+                                        sky.background(x, y, d[0], d[1], d[2], skyC);
                                         skyDone = true;
                                     }
                                     c2[0] = skyC[0]; c2[1] = skyC[1]; c2[2] = skyC[2];
@@ -188,10 +200,14 @@ final class RealisticShader {
                         s[0] = sr / traced; s[1] = sg / traced; s[2] = sb / traced;
                         lodBg = hits * 2 >= traced;
                         lodMeter = hits > 0 ? msum / hits : 0;
+                        skyFrac *= (traced - hits) / (double) traced;
+                        if (lodBg) lodDist = dsum / hits;
                     }
+                    open[i] = (float) (skyFrac * sky.cloudTransmittance(x, y));
                 }
-                if (bg == samples || (!opaque && !translucent)) {
+                if (!opaque && !translucent) {
                     store(hr, hg, hb, i, s);
+                    dist[i] = (float) lodDist;
                     if (lodBg) {
                         surface[i] = true;
                         meter[i] = (float) lodMeter;
@@ -211,6 +227,14 @@ final class RealisticShader {
                     pb = (pb * samples - bg * (fog & 255) / 255.0) * k;
                 }
 
+                // Water in front of the opaque surface (or of the background).
+                double td = gb.tDist[i];
+                double wx = cam.x + d[0] * td, wy = cam.y + d[1] * td, wz = cam.z + d[2] * td;
+                int tnp = gb.tNormal[i];
+                double tnx = GBuffer.nx(tnp), tny = GBuffer.ny(tnp), tnz = GBuffer.nz(tnp);
+                boolean water = translucent && blocks.getBlockState(cursor.set(Mth.floor(wx - tnx * 0.02), Mth.floor(wy - tny * 0.02),
+                        Mth.floor(wz - tnz * 0.02))).getFluidState().is(FluidTags.WATER);
+
                 double surfDist;
                 if (opaque) {
                     double lco = gb.coLight[i];
@@ -222,23 +246,21 @@ final class RealisticShader {
                         ar = ((alb >> 16) & 255) / 255.0; ag = ((alb >> 8) & 255) / 255.0; ab = (alb & 255) / 255.0;
                     }
                     double ox = cam.x + d[0] * dist[i], oy = cam.y + d[1] * dist[i], oz = cam.z + d[2] * dist[i];
-                    shadeOpaque(gb, i, d, ox, oy, oz, toLinear(ar), toLinear(ag), toLinear(ab), shadow[i], atm, sky, st,
+                    double sun = shadow[i];
+                    if (water && sun > 0) sun *= caustics(ox, oz, wy - oy, lx, ly, lz);
+                    shadeOpaque(gb, i, d, ox, oy, oz, toLinear(ar), toLinear(ag), toLinear(ab), sun, atm, sky, st,
                             blocks, cursor, lx, ly, lz, lightIrr, lightUp, translucent, amb, opq);
                     surfDist = dist[i];
                 } else {
-                    opq[0] = opq[1] = opq[2] = 0;
+                    // Glass or water with nothing near behind it: it's in front of the background.
+                    opq[0] = s[0]; opq[1] = s[1]; opq[2] = s[2];
                     surfDist = gb.tDist[i];
                 }
 
                 if (translucent) {
-                    double td = gb.tDist[i];
-                    double wx = cam.x + d[0] * td, wy = cam.y + d[1] * td, wz = cam.z + d[2] * td;
-                    int tnp = gb.tNormal[i];
-                    double tnx = GBuffer.nx(tnp), tny = GBuffer.ny(tnp), tnz = GBuffer.nz(tnp);
-                    BlockState tstate = blocks.getBlockState(cursor.set(Mth.floor(wx - tnx * 0.02), Mth.floor(wy - tny * 0.02), Mth.floor(wz - tnz * 0.02)));
-                    if (tstate.getFluidState().is(FluidTags.WATER)) {
-                        shadeWater(gb.tAlbedo[i], GBuffer.sky(gb.tLight[i]), d, wx, wz, tnx, tny, tnz,
-                                opaque ? dist[i] - td : Double.POSITIVE_INFINITY, opq, atm, sky, st, c);
+                    if (water) {
+                        shadeWater(gb.tAlbedo[i], GBuffer.sky(gb.tLight[i]), d, td, wx, wy, wz, tnx, tny, tnz,
+                                opaque ? dist[i] - td : Double.POSITIVE_INFINITY, opq, atm, sky, st, ssr, c);
                     } else {
                         shadeGlass(gb, i, opq, atm, c);
                     }
@@ -248,23 +270,95 @@ final class RealisticShader {
                 }
 
                 meter[i] = (float) (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]);
-                applyHaze(c, d, surfDist, cam, sky, st, overcast, fadeEnd, haze);
+                applyHaze(x, y, c, d, surfDist, cam, sky, st, overcast, fadeEnd, haze);
 
-                double cover = bg / (double) samples;
+                // Background samples without a surface. Camera Obscura doesn't write depth for translucent surfaces,
+                // so where there is only glass or water, its background samples are still covered by it.
+                double cover = opaque ? bg / (double) samples : 0;
                 for (int k = 0; k < 3; k++) c[k] += (s[k] - c[k]) * cover;
                 store(hr, hg, hb, i, c);
+                dist[i] = (float) (cover < 0.5 ? surfDist : lodDist);
                 surface[i] = cover < 0.5 || lodBg;
             }
         }
 
+        if (st.sunRays > 0 && lightUp > 0 && sky.flat == null) {
+            sunRays(hr, hg, hb, open, vdx, vdy, vdz, w, h, f, lx, ly, lz, lightIrr, overcast, st);
+        }
         finish(px, hr, hg, hb, surface, meter, w, h, st);
     }
 
     /**
-     * Aerial perspective: distant surfaces fade into the light of the atmosphere in front of them, and near
-     * {@code fadeEnd} (the end of what's loaded) into the sky itself.
+     * Sun rays: sunlight scattered towards the camera by the haze, except where trees, terrain or clouds shade the
+     * air in between. Done in screen space, as a blur of the open sky towards the sun (as in GPU Gems 3), so the sun
+     * has to be in front of the camera.
      */
-    private static void applyHaze(double[] c, double[] d, double surfDist, Vector3d cam, Sky sky,
+    private static void sunRays(float[] r, float[] g, float[] b, float[] open, float[] vdx, float[] vdy, float[] vdz,
+                                int w, int h, SimpleShader.Frame f, double lx, double ly, double lz, double[] lightIrr,
+                                double overcast, DailyCamsConfig.RealisticSettings st) {
+        Vector3d cam = f.camera();
+        Matrix4d viewProjection = new Matrix4d(f.inverseViewProjection()).invert();
+        Vector3d forward = f.inverseViewProjection().transformProject(new Vector3d(0, 0, 1)).sub(cam).normalize();
+        if (forward.x * lx + forward.y * ly + forward.z * lz < 0.05) return;
+        Vector3d p = viewProjection.transformProject(new Vector3d(cam.x + lx * 1e4, cam.y + ly * 1e4, cam.z + lz * 1e4));
+        double sunX = (p.x + 1) * 0.5 * w, sunY = h - (p.y + 1) * 0.5 * h;
+        // Fades out as the sun moves far off the picture.
+        double off = Math.max(Math.max(-sunX, sunX - w) / w, Math.max(-sunY, sunY - h) / h);
+        double visible = 1 - smoothstep(0, 0.7, off);
+        if (visible <= 0) return;
+
+        int q = 4, bw = Math.max(1, w / q), bh = Math.max(1, h / q);
+        float[] mask = new float[bw * bh], rays = new float[bw * bh];
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) mask[Math.min(bh - 1, y / q) * bw + Math.min(bw - 1, x / q)] += open[y * w + x];
+        }
+        for (int i = 0; i < mask.length; i++) mask[i] /= q * q;
+        int samples = 40;
+        double decay = 0.965, sx = sunX / q - 0.5, sy = sunY / q - 0.5;
+        for (int y = 0; y < bh; y++) {
+            Throttle.checkpoint();
+            for (int x = 0; x < bw; x++) {
+                double stepX = (sx - x) / samples * 0.95, stepY = (sy - y) / samples * 0.95;
+                double px = x, py = y, sum = 0, wt = 1, wsum = 0;
+                for (int k = 0; k < samples; k++) {
+                    px += stepX; py += stepY;
+                    int ix = (int) Math.round(px), iy = (int) Math.round(py);
+                    if (ix >= 0 && iy >= 0 && ix < bw && iy < bh) sum += mask[iy * bw + ix] * wt;
+                    else sum += wt; // beyond the picture's edge, assume open sky
+                    wsum += wt;
+                    wt *= decay;
+                }
+                rays[y * bw + x] = (float) (sum / wsum);
+            }
+        }
+        // Stronger with a low sun (a longer path through the haze) and in hazy weather.
+        double k = 0.016 * st.sunRays * st.haze * (1 + 1.5 * overcast) * (1 + 2 * (1 - smoothstep(0.05, 0.4, ly))) * visible;
+        for (int y = 0; y < h; y++) {
+            Throttle.checkpoint();
+            double fy = Math.clamp((y + 0.5) / q - 0.5, 0, bh - 1);
+            int y0 = (int) fy, y1 = Math.min(bh - 1, y0 + 1);
+            double ty = fy - y0;
+            for (int x = 0; x < w; x++) {
+                int i = y * w + x;
+                double fx = Math.clamp((x + 0.5) / q - 0.5, 0, bw - 1);
+                int x0 = (int) fx, x1 = Math.min(bw - 1, x0 + 1);
+                double tx = fx - x0;
+                double ray = (rays[y0 * bw + x0] * (1 - tx) + rays[y0 * bw + x1] * tx) * (1 - ty)
+                        + (rays[y1 * bw + x0] * (1 - tx) + rays[y1 * bw + x1] * tx) * ty;
+                double mu = vdx[i] * lx + vdy[i] * ly + vdz[i] * lz;
+                double phase = Sky.hg(mu, 0.72);
+                // The open sky already has its glow around the sun.
+                double a = ray * phase * k * (1 - 0.6 * open[i]);
+                r[i] += (float) (lightIrr[0] * a); g[i] += (float) (lightIrr[1] * a); b[i] += (float) (lightIrr[2] * a);
+            }
+        }
+    }
+
+    /**
+     * Aerial perspective: distant surfaces fade into the light of the atmosphere in front of them, and near
+     * {@code fadeEnd} (the end of what's loaded) into the sky behind pixel (x, y), clouds included.
+     */
+    private static void applyHaze(int x, int y, double[] c, double[] d, double surfDist, Vector3d cam, Sky sky,
                                   DailyCamsConfig.RealisticSettings st, double overcast, double fadeEnd, double[] haze) {
         double py = cam.y + d[1] * surfDist;
         double height = Math.exp(-Math.max(0, (py + cam.y) * 0.5 - 64) / 140);
@@ -275,7 +369,7 @@ final class RealisticShader {
         for (int k = 0; k < 3; k++) c[k] += (haze[k] - c[k]) * fogAmt;
         double border = smoothstep(fadeEnd * 0.55, fadeEnd * 0.99, surfDist);
         if (border > 0) {
-            sky.radiance(d[0], d[1], d[2], false, haze);
+            sky.background(x, y, d[0], d[1], d[2], haze);
             for (int k = 0; k < 3; k++) c[k] += (haze[k] - c[k]) * border;
         }
     }
@@ -286,11 +380,11 @@ final class RealisticShader {
      * it. Lit by {@link #lightSurface}, exactly like the near terrain. Writes the hazed radiance to {@code out} and
      * returns the brightness before haze (for metering).
      */
-    private static double shadeLod(LodTerrain lod, LodTerrain.Hit hit, LodTerrain.Hit shadowHit, double[] d, Vector3d cam,
+    private static double shadeLod(int x, int y, LodTerrain lod, LodTerrain.Hit hit, LodTerrain.Hit shadowHit, double[] d, Vector3d cam,
                                    Atmosphere atm, Sky sky, DailyCamsConfig.RealisticSettings st, double lx, double ly,
                                    double lz, double[] lightIrr, double lightUp, double overcast, double fadeEnd,
-                                   double sampleAngle, double[] amb, double[] haze, double[] behind, double[] tint,
-                                   double[] alb, double[] out) {
+                                   double sampleAngle, Reflections ssr, double[] amb, double[] haze, double[] behind,
+                                   double[] tint, double[] alb, double[] out) {
         double t = hit.t;
         behind[0] = behind[1] = behind[2] = 0;
         if (!hit.deep) {
@@ -316,20 +410,20 @@ final class RealisticShader {
         double dist = t;
         if (hit.water) {
             double wt = hit.waterT;
-            double wx = cam.x + d[0] * wt, wz = cam.z + d[2] * wt;
+            double wx = cam.x + d[0] * wt, wy = cam.y + d[1] * wt, wz = cam.z + d[2] * wt;
             net.minecraft.world.level.biome.Biome biome = lod.biomeAt(hit.waterX, hit.waterY, hit.waterZ);
             int wc = biome != null ? biome.getWaterColor() : 0x3F76E4;
             // Water as Camera Obscura draws it up close: the water texture (about 0.75 grey) times the biome colour.
             int r = (int) (((wc >> 16) & 255) * 0.75), g = (int) (((wc >> 8) & 255) * 0.75), b = (int) ((wc & 255) * 0.75);
             double skyW = lod.skyAt(hit.waterX, hit.waterY + 1, hit.waterZ) / 15.0;
-            shadeWater(0xB0000000 | r << 16 | g << 8 | b, skyW, d, wx, wz, 0, 1, 0,
-                    hit.deep ? Double.POSITIVE_INFINITY : t - wt, behind, atm, sky, st, out);
+            shadeWater(0xB0000000 | r << 16 | g << 8 | b, skyW, d, wt, wx, wy, wz, 0, 1, 0,
+                    hit.deep ? Double.POSITIVE_INFINITY : t - wt, behind, atm, sky, st, ssr, out);
             dist = wt;
         } else {
             out[0] = behind[0]; out[1] = behind[1]; out[2] = behind[2];
         }
         double lum = 0.2126 * out[0] + 0.7152 * out[1] + 0.0722 * out[2];
-        applyHaze(out, d, dist, cam, sky, st, overcast, fadeEnd, haze);
+        applyHaze(x, y, out, d, dist, cam, sky, st, overcast, fadeEnd, haze);
         return lum;
     }
 
@@ -377,17 +471,18 @@ final class RealisticShader {
         }
     }
 
-    /** Reflection of the sky (Fresnel), sun glint and light absorbed by the water body. */
-    /** {@code tintArgb}: the water's colour as drawn (texture and biome tint); {@code skyLight}: 0-1 at the surface. */
-    private static void shadeWater(int tintArgb, double skyLight, double[] d, double wx, double wz, double nx, double ny, double nz,
-                                   double depthBelow, double[] behind, Atmosphere atm, Sky sky,
-                                   DailyCamsConfig.RealisticSettings st, double[] out) {
+    /**
+     * Reflections (Fresnel) of the terrain on screen and of the sky, and light absorbed by the water body.
+     * {@code tintArgb}: the water's colour as drawn (texture and biome tint); {@code skyLight}: 0-1 at the surface.
+     */
+    private static void shadeWater(int tintArgb, double skyLight, double[] d, double viewDist, double wx, double wy, double wz,
+                                   double nx, double ny, double nz, double depthBelow, double[] behind, Atmosphere atm, Sky sky,
+                                   DailyCamsConfig.RealisticSettings st, Reflections ssr, double[] out) {
         if (ny > 0.5) {
-            // Small waves: tilt the surface normal with smooth noise.
-            double e = 0.35;
-            double hx = Noise.fbm(wx * 0.55 + e, wz * 0.55, 3) - Noise.fbm(wx * 0.55 - e, wz * 0.55, 3);
-            double hz = Noise.fbm(wx * 0.55, wz * 0.55 + e, 3) - Noise.fbm(wx * 0.55, wz * 0.55 - e, 3);
-            nx = -hx * 0.35; nz = -hz * 0.35; ny = 1;
+            // Gentle waves. Further away they average out, and the water turns into a calmer mirror.
+            double e = 0.04, calm = 1 / (1 + viewDist / 70);
+            double h0 = waveHeight(wx, wz);
+            nx = -(waveHeight(wx + e, wz) - h0) / e * calm; nz = -(waveHeight(wx, wz + e) - h0) / e * calm; ny = 1;
             double l = Math.sqrt(nx * nx + ny * ny + nz * nz);
             nx /= l; ny /= l; nz /= l;
         }
@@ -396,9 +491,12 @@ final class RealisticShader {
         double dn = d[0] * nx + d[1] * ny + d[2] * nz;
         double rx = d[0] - 2 * dn * nx, ry = Math.max(0.02, d[1] - 2 * dn * ny), rz = d[2] - 2 * dn * nz;
         double rl = Math.sqrt(rx * rx + ry * ry + rz * rz);
-        double[] refl = new double[3];
-        sky.radiance(rx / rl, ry / rl, rz / rl, true, refl);
+        rx /= rl; ry /= rl; rz /= rl;
+        double[] refl = new double[3], scene = new double[3];
+        sky.radiance(rx, ry, rz, true, refl);
         double skyVis = Math.pow(skyLight, 2);
+        // What the reflected ray hits on screen (trees, hills, distant terrain), where it finds something.
+        double hit = fresnel > 0.003 ? ssr.trace(wx, wy, wz, rx, ry, rz, scene) : 0;
         double[] up = new double[3];
         atm.ambient(0, 1, 0, up);
 
@@ -415,7 +513,8 @@ final class RealisticShader {
             // Light reaching the bottom crosses the water twice: down from the surface and back up to the eye.
             double t = Double.isFinite(depthBelow) ? Math.exp(-absorb[k] * 2 * Math.max(0, depthBelow)) : 0;
             double body = behind[k] * t + scatter[k] * (1 - t);
-            out[k] = body * (1 - fresnel) + refl[k] * (fresnel * skyVis + (1 - skyVis) * 0.02 * fresnel);
+            double skyRefl = refl[k] * (fresnel * skyVis + (1 - skyVis) * 0.02 * fresnel);
+            out[k] = body * (1 - fresnel) + skyRefl + (scene[k] * fresnel - skyRefl) * hit;
         }
     }
 
@@ -431,6 +530,102 @@ final class RealisticShader {
         for (int k = 0; k < 3; k++) {
             double lit = alb[k] / Math.PI * (amb[k] * skyVis + atm.sunIrradiance[k] * Math.max(0, atm.sy) * skyVis);
             out[k] = behind[k] * (1 - a) + lit * a;
+        }
+    }
+
+    /** Directional swells (direction x, z, wave number, height) of {@link #waveHeight}. */
+    private static final double[][] WAVES = {
+            {0.80, 0.60, 0.85, 0.040}, {-0.38, 0.92, 1.55, 0.024}, {0.97, -0.26, 2.70, 0.013}, {-0.71, -0.70, 4.40, 0.007}};
+
+    /** Height of the water surface above its block level, in blocks: a few swells and fine ripples. */
+    static double waveHeight(double x, double z) {
+        double v = 0;
+        for (double[] wv : WAVES) v += Math.sin((wv[0] * x + wv[1] * z) * wv[2] + wv[2] * 7.3) * wv[3];
+        return v + (Noise.fbm(x * 1.7, z * 1.7, 3) - 0.5) * 0.05;
+    }
+
+    /**
+     * Sunlight focused by the waves onto the ground under water: a network of bright lines, which blurs out with
+     * depth. {@code depth}: water above the point. 1 = no change; averages to about 1.
+     */
+    static double caustics(double x, double z, double depth, double lx, double ly, double lz) {
+        if (depth <= 0.05) return 1;
+        // Where the light passed through the surface above this point.
+        double k = depth / Math.max(0.2, ly);
+        double px = (x + lx * k) * 0.42, pz = (z + lz * k) * 0.42;
+        double a = 1 - Math.abs(Noise.value(px, pz) * 2 - 1), b = 1 - Math.abs(Noise.value(px * 1.37 + 5.2, pz * 1.37 - 3.1) * 2 - 1);
+        double lines = Math.pow(a, 7) + Math.pow(b, 7);
+        double strength = smoothstep(0.05, 1.2, depth) * Math.exp(-depth * 0.12);
+        return Math.max(0, 1 + strength * (lines * 2.6 - 0.55));
+    }
+
+    /**
+     * Screen-space reflections: follows a reflected ray through the picture and returns what it runs into, from the
+     * pixels already shaded (the rows above the current one; reflections on water mostly look upwards on screen).
+     */
+    static final class Reflections {
+        private static final int STEPS = 64;
+        private final Matrix4d viewProjection;
+        private final Vector3d cam, q = new Vector3d(), p = new Vector3d();
+        private final float[] r, g, b, dist;
+        private final int w, h;
+        private final double fx, fy, fz;
+        /** Rows before this one are shaded. */
+        int row;
+
+        Reflections(SimpleShader.Frame f, int w, int h, float[] r, float[] g, float[] b, float[] dist) {
+            this.viewProjection = new Matrix4d(f.inverseViewProjection()).invert();
+            this.cam = f.camera();
+            this.w = w; this.h = h;
+            this.r = r; this.g = g; this.b = b; this.dist = dist;
+            // The view direction, to stop at points behind the camera.
+            Vector3d centre = f.inverseViewProjection().transformProject(new Vector3d(0, 0, 1)).sub(cam).normalize();
+            fx = centre.x; fy = centre.y; fz = centre.z;
+        }
+
+        /** Returns how much of the reflection was found (0-1, fading towards the picture's edges) and its colour. */
+        double trace(double ox, double oy, double oz, double dx, double dy, double dz, double[] out) {
+            double t = 0, dt = 0.35, prevT = 0;
+            for (int s = 0; s < STEPS; s++) {
+                prevT = t;
+                t += dt;
+                dt *= 1.13;
+                int j = project(ox + dx * t, oy + dy * t, oz + dz * t);
+                if (j == -1) return 0;
+                if (j == -2) continue;
+                double sd = dist[j];
+                if (!Double.isFinite(sd)) continue;
+                double rd = q.length();
+                if (rd < sd) continue;
+                if (rd - sd > Math.max(1.5, sd * 0.04) + dt * 1.5) continue; // passed behind something
+                // Narrow down where the ray meets the surface.
+                double lo = prevT, hi = t;
+                for (int k = 0; k < 5; k++) {
+                    double mid = (lo + hi) * 0.5;
+                    int m = project(ox + dx * mid, oy + dy * mid, oz + dz * mid);
+                    if (m >= 0 && Double.isFinite(dist[m]) && q.length() >= dist[m]) { hi = mid; j = m; } else lo = mid;
+                }
+                out[0] = r[j]; out[1] = g[j]; out[2] = b[j];
+                // Fade out towards the edges of the picture, where the reflected object may be cut off.
+                int x = j % w, y = j / w;
+                double edge = Math.min(Math.min(x, w - 1 - x) / (w * 0.06), y / (h * 0.06));
+                return Math.clamp(edge, 0, 1);
+            }
+            return 0;
+        }
+
+        /**
+         * Pixel a point is drawn at (q = the point relative to the camera), -1 when off screen or behind the camera,
+         * -2 when that pixel isn't shaded yet.
+         */
+        private int project(double x, double y, double z) {
+            q.set(x - cam.x, y - cam.y, z - cam.z);
+            if (q.x * fx + q.y * fy + q.z * fz < 0.05) return -1;
+            viewProjection.transformProject(x, y, z, p);
+            if (p.x < -1 || p.x >= 1 || p.y < -1 || p.y >= 1) return -1;
+            int px = (int) ((p.x + 1) * 0.5 * w), py = h - 1 - (int) ((p.y + 1) * 0.5 * h);
+            if (py >= row) return -2;
+            return py * w + px;
         }
     }
 
@@ -597,9 +792,39 @@ final class RealisticShader {
                 AgX.apply(c, st.saturation, st.contrast);
                 double dx = (x - cx) / maxR, dy = (y - cy) / maxR;
                 double v = 1 - st.vignette * Math.pow(Math.min(1, Math.sqrt(dx * dx + dy * dy)), 2.4);
-                // A little noise before quantising hides banding in smooth skies.
+                // From here on r, g, b hold the finished picture (sRGB, 0-1).
+                r[i] = (float) toSrgb(c[0] * v); g[i] = (float) toSrgb(c[1] * v); b[i] = (float) toSrgb(c[2] * v);
+            }
+        }
+        sharpen(px, r, g, b, w, h, st.sharpness);
+    }
+
+    /**
+     * Contrast-adaptive sharpening (after AMD's CAS): sharpens less where the picture already has strong edges, so
+     * there are no halos. Then quantises to 8 bits, with a little noise that hides banding in smooth skies.
+     */
+    private static void sharpen(int[] px, float[] r, float[] g, float[] b, int w, int h, double sharpness) {
+        float[][] ch = {r, g, b};
+        int[] out = new int[3];
+        for (int y = 0; y < h; y++) {
+            Throttle.checkpoint();
+            int up = Math.max(0, y - 1) * w, down = Math.min(h - 1, y + 1) * w, row = y * w;
+            for (int x = 0; x < w; x++) {
+                int i = row + x, left = row + Math.max(0, x - 1), right = row + Math.min(w - 1, x + 1);
                 double dither = (Noise.hash(x, y, 7) - 0.5) / 255.0;
-                px[i] = 0xFF000000 | to8(toSrgb(c[0] * v) + dither) << 16 | to8(toSrgb(c[1] * v) + dither) << 8 | to8(toSrgb(c[2] * v) + dither);
+                for (int k = 0; k < 3; k++) {
+                    float[] a = ch[k];
+                    double c = a[i], n = a[up + x], s = a[down + x], e = a[right], wv = a[left];
+                    if (sharpness > 0) {
+                        double mn = Math.min(c, Math.min(Math.min(n, s), Math.min(e, wv)));
+                        double mx = Math.max(c, Math.max(Math.max(n, s), Math.max(e, wv)));
+                        double amp = Math.sqrt(Math.clamp(Math.min(mn, 1 - mx) / Math.max(mx, 1e-5), 0, 1));
+                        double wt = -0.2 * sharpness * amp;
+                        c = (c + wt * (n + s + e + wv)) / (1 + 4 * wt);
+                    }
+                    out[k] = to8(c + dither);
+                }
+                px[i] = 0xFF000000 | out[0] << 16 | out[1] << 8 | out[2];
             }
         }
     }
@@ -709,6 +934,10 @@ final class RealisticShader {
         double dimensionLight;
 
         void radiance(double dx, double dy, double dz, boolean full, double[] out) {
+            radiance(dx, dy, dz, full, out, full);
+        }
+
+        private void radiance(double dx, double dy, double dz, boolean full, double[] out, boolean withClouds) {
             if (flat != null) {
                 out[0] = flat[0]; out[1] = flat[1]; out[2] = flat[2];
                 return;
@@ -734,45 +963,221 @@ final class RealisticShader {
                     }
                 }
             }
-            if (full && dy > 0.005 && coverage > 0 && cam.y < CLOUD_ALTITUDE) {
-                double t = (CLOUD_ALTITUDE - cam.y) / dy;
-                if (t < 60000) {
-                    double qx = cam.x + dx * t, qz = cam.z + dz * t;
-                    double a = cloudAlpha(qx, qz);
-                    if (a > 0) {
-                        boolean sunUp = atm.sy > 0;
-                        double lx = sunUp ? atm.sx : atm.mx, lz = sunUp ? atm.sz : atm.mz;
-                        double[] irr = sunUp ? atm.sunIrradiance : atm.moonIrradiance;
-                        double self = Math.exp(-3.2 * cloudAlpha(qx + lx * 180, qz + lz * 180));
-                        double mu = dx * (sunUp ? atm.sx : atm.mx) + dy * (sunUp ? atm.sy : atm.my) + dz * (sunUp ? atm.sz : atm.mz);
-                        double forward = 1 + 2.4 * Math.pow(Math.max(0, mu), 8) + 3.0 * Math.pow(Math.max(0, mu), 60) * (1 - a);
-                        double fade = Math.exp(-t / 36000) * smoothstep(0.005, 0.09, dy);
-                        double dim = 1 - 0.55 * overcast;
-                        for (int k = 0; k < 3; k++) {
-                            double cr = (irr[k] * (0.12 + 0.88 * self) * 0.34 * forward + up[k] * 0.3) * dim;
-                            out[k] += (cr - out[k]) * a * fade;
+            if (withClouds && dy > 0.005 && coverage > 0 && cam.y < CLOUD_TOP) {
+                cloud(dx, dy, dz, REFLECTION_STEPS, Noise.hash((int) (dx * 7919), (int) (dy * 6007), (int) (dz * 4721)), cl);
+                for (int k = 0; k < 3; k++) out[k] = out[k] * cl[3] + cl[k];
+            }
+        }
+
+        private final double[] cl = new double[4];
+        /** Clouds over the picture at half resolution: light (r, g, b) and what's left of the sky behind (a). */
+        private float[] cloudLight;
+        private int cloudW, cloudH;
+
+        /**
+         * Sky behind the picture at a pixel: the sky as {@link #radiance} draws it, with clouds from the half
+         * resolution layer made by {@link #prepareClouds}.
+         */
+        /** How much of the sky behind pixel (x, y) the clouds let through. */
+        double cloudTransmittance(int x, int y) {
+            if (cloudLight == null) return 1;
+            float a = cloudLight[(Math.min(cloudH - 1, y / 2) * cloudW + Math.min(cloudW - 1, x / 2)) * 4 + 3];
+            return a < 0 ? 1 : a;
+        }
+
+        void background(int x, int y, double dx, double dy, double dz, double[] out) {
+            radiance(dx, dy, dz, true, out, false);
+            if (cloudLight == null || dy <= 0.005) return;
+            // Bilinear, from the cells that were computed.
+            double fx = (x + 0.5) / 2 - 0.5, fy = (y + 0.5) / 2 - 0.5;
+            int x0 = Mth.floor(fx), y0 = Mth.floor(fy);
+            double tx = fx - x0, ty = fy - y0, wsum = 0, r = 0, g = 0, b = 0, a = 0;
+            for (int j = 0; j < 2; j++) {
+                for (int i = 0; i < 2; i++) {
+                    int cx = Math.clamp(x0 + i, 0, cloudW - 1), cy = Math.clamp(y0 + j, 0, cloudH - 1), c = (cy * cloudW + cx) * 4;
+                    if (cloudLight[c + 3] < 0) continue;
+                    double wt = (i == 0 ? 1 - tx : tx) * (j == 0 ? 1 - ty : ty) + 1e-4;
+                    r += cloudLight[c] * wt; g += cloudLight[c + 1] * wt; b += cloudLight[c + 2] * wt; a += cloudLight[c + 3] * wt;
+                    wsum += wt;
+                }
+            }
+            if (wsum <= 0) {
+                cloud(dx, dy, dz, CLOUD_STEPS, 0.5, cl);
+                r = cl[0]; g = cl[1]; b = cl[2]; a = cl[3];
+            } else {
+                r /= wsum; g /= wsum; b /= wsum; a /= wsum;
+            }
+            out[0] = out[0] * a + r; out[1] = out[1] * a + g; out[2] = out[2] * a + b;
+        }
+
+        /**
+         * Marches the clouds for every pixel where the sky can show (also through terrain fading into it), at half resolution, then blurs them a little:
+         * each ray starts at a slightly different depth (a dither), which the blur turns into smooth gradients.
+         */
+        void prepareClouds(SimpleShader.Frame f, int w, int h, float[] dist, double[] depth, int fbW, int scale, double fadeStart) {
+            if (flat != null || coverage <= 0 || cam.y >= CLOUD_TOP) return;
+            cloudW = (w + 1) / 2; cloudH = (h + 1) / 2;
+            float[] c = new float[cloudW * cloudH * 4];
+            Vector3d tmp = new Vector3d();
+            for (int y = 0; y < cloudH; y++) {
+                Throttle.checkpoint();
+                for (int x = 0; x < cloudW; x++) {
+                    int o = (y * cloudW + x) * 4;
+                    // Not needed where the 2x2 pixels are all solid terrain, closer than where it fades into the sky.
+                    boolean needed = false;
+                    for (int j = 0; j < 2 && !needed; j++) {
+                        for (int i = 0; i < 2 && !needed; i++) {
+                            int px = Math.min(w - 1, x * 2 + i), py = Math.min(h - 1, y * 2 + j);
+                            if (!(dist[py * w + px] < fadeStart)) needed = true;
+                            else {
+                                int row = (h - 1 - py) * scale;
+                                for (int sy = 0; sy < scale && !needed; sy++)
+                                    for (int sx = 0; sx < scale && !needed; sx++)
+                                        if (Double.isInfinite(depth[(row + sy) * fbW + px * scale + sx])) needed = true;
+                            }
                         }
+                    }
+                    if (!needed) { c[o + 3] = -1; continue; }
+                    double ndcX = (x * 2 + 1.0) / w * 2 - 1, ndcY = 1 - (y * 2 + 1.0) / h * 2;
+                    tmp.set(ndcX, ndcY, 1.0);
+                    f.inverseViewProjection().transformProject(tmp);
+                    double dx = tmp.x - cam.x, dy = tmp.y - cam.y, dz = tmp.z - cam.z, l = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                    dx /= l; dy /= l; dz /= l;
+                    if (dy <= 0.005) { c[o + 3] = 1; continue; }
+                    // Interleaved gradient noise: a dither that blurs out evenly.
+                    double ign = (52.9829189 * ((0.06711056 * x + 0.00583715 * y) % 1.0)) % 1.0;
+                    cloud(dx, dy, dz, CLOUD_STEPS, ign, cl);
+                    c[o] = (float) cl[0]; c[o + 1] = (float) cl[1]; c[o + 2] = (float) cl[2]; c[o + 3] = (float) cl[3];
+                }
+            }
+            cloudLight = blurClouds(c, cloudW, cloudH);
+        }
+
+        /** 5-tap separable blur over the computed cells only. */
+        private static float[] blurClouds(float[] c, int w, int h) {
+            double[] k = {1, 4, 6, 4, 1};
+            float[] tmp = new float[c.length], out = new float[c.length];
+            for (int pass = 0; pass < 2; pass++) {
+                float[] src = pass == 0 ? c : tmp, dst = pass == 0 ? tmp : out;
+                for (int y = 0; y < h; y++) {
+                    for (int x = 0; x < w; x++) {
+                        int o = (y * w + x) * 4;
+                        if (src[o + 3] < 0) { dst[o + 3] = -1; continue; }
+                        double r = 0, g = 0, b = 0, a = 0, ws = 0;
+                        for (int t = -2; t <= 2; t++) {
+                            int xx = pass == 0 ? x + t : x, yy = pass == 0 ? y : y + t;
+                            if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+                            int q = (yy * w + xx) * 4;
+                            if (src[q + 3] < 0) continue;
+                            double wt = k[t + 2];
+                            r += src[q] * wt; g += src[q + 1] * wt; b += src[q + 2] * wt; a += src[q + 3] * wt;
+                            ws += wt;
+                        }
+                        dst[o] = (float) (r / ws); dst[o + 1] = (float) (g / ws); dst[o + 2] = (float) (b / ws); dst[o + 3] = (float) (a / ws);
                     }
                 }
             }
+            return out;
+        }
+
+        /** Extinction of cloud at density 1, per block. */
+        private static final double CLOUD_EXTINCTION = 0.045;
+        private static final int CLOUD_STEPS = 32, REFLECTION_STEPS = 14;
+        private static final double[] LIGHT_STEPS = {18, 40, 85, 170};
+
+        /**
+         * Volumetric cumulus: a ray marched through the cloud layer. At each step, light from the sun (or moon) is
+         * followed a little way towards it to find how much cloud it passes through. Light that is scattered many
+         * times keeps the shaded parts of clouds grey instead of black; a forward-scattering phase function gives
+         * them bright edges around the sun. Writes the clouds' light to {@code out[0..2]} and the fraction of the
+         * sky behind that still shows to {@code out[3]}. {@code jitter} (0-1) shifts where the steps start.
+         */
+        private void cloud(double dx, double dy, double dz, int steps, double jitter, double[] out) {
+            out[0] = out[1] = out[2] = 0;
+            out[3] = 1;
+            double t0 = Math.max(0, (CLOUD_BOTTOM - cam.y) / dy), t1 = (CLOUD_TOP - cam.y) / dy;
+            if (t0 > 40000) return;
+            t1 = Math.min(t1, t0 + 5000);
+            boolean sunUp = atm.sy > 0;
+            double lx = sunUp ? atm.sx : atm.mx, ly = sunUp ? atm.sy : atm.my, lz = sunUp ? atm.sz : atm.mz;
+            double[] irr = sunUp ? atm.sunIrradiance : atm.moonIrradiance;
+            double mu = dx * lx + dy * ly + dz * lz;
+            // Two Henyey-Greenstein lobes (relative to isotropic): mostly forward, a little back.
+            double phase = 0.75 * hg(mu, 0.65) + 0.25 * hg(mu, -0.2);
+            double ds = (t1 - t0) / steps;
+            double t = t0 + ds * jitter;
+            double trans = 1, lr = 0, lg = 0, lb = 0;
+            for (int i = 0; i < steps && trans > 0.02; i++, t += ds) {
+                double px = cam.x + dx * t, py = cam.y + dy * t, pz = cam.z + dz * t;
+                double rho = cloudDensity(px, py, pz, true);
+                if (rho <= 0) continue;
+                // Cloud between this point and the light.
+                double od = 0, prev = 0;
+                for (double lt : LIGHT_STEPS) {
+                    double ld = cloudDensity(px + lx * lt, py + ly * lt, pz + lz * lt, false);
+                    od += ld * (lt - prev);
+                    prev = lt;
+                }
+                od *= CLOUD_EXTINCTION;
+                // Multiple scattering (Wrenninge's approximation): ever weaker, wider, less directional octaves.
+                double sun = Math.exp(-od) * phase + 0.5 * Math.exp(-od * 0.25) * (0.5 + 0.5 * phase)
+                        + 0.3 * Math.exp(-od * 0.06);
+                // Edges facing the light are a little darker than the inside of a sunlit cloud ("powder" effect).
+                sun *= 1 - 0.35 * Math.exp(-rho * 2.5);
+                double hf = (py - CLOUD_BOTTOM) / (CLOUD_TOP - CLOUD_BOTTOM);
+                double amb = (0.5 + 0.5 * hf) * 1.05;
+                double stepT = Math.exp(-rho * CLOUD_EXTINCTION * ds), k = trans * (1 - stepT);
+                lr += k * (irr[0] * sun * 0.38 + up[0] / Math.PI * amb);
+                lg += k * (irr[1] * sun * 0.38 + up[1] / Math.PI * amb);
+                lb += k * (irr[2] * sun * 0.38 + up[2] / Math.PI * amb);
+                trans *= stepT;
+            }
+            if (trans >= 1) return;
+            // Far clouds fade into the sky near the horizon.
+            double fade = Math.exp(-t0 / 22000) * smoothstep(0.005, 0.08, dy);
+            double dim = 1 - 0.55 * overcast;
+            out[0] = lr * dim * fade; out[1] = lg * dim * fade; out[2] = lb * dim * fade;
+            out[3] = 1 - (1 - trans) * fade;
+        }
+
+        /** Henyey-Greenstein phase function, 1 = isotropic. */
+        static double hg(double mu, double g) {
+            double g2 = g * g;
+            return (1 - g2) / Math.pow(1 + g2 - 2 * g * mu, 1.5);
+        }
+
+        /** Where clouds are, seen from above: 0 = clear sky, 1 = the thickest cloud. */
+        private double cloudCover(double x, double z) {
+            double px = (x + windX) / 1600.0, pz = (z + windZ) / 1600.0;
+            // Domain warping breaks up the regular blobs into cumulus-like shapes.
+            double wx = Noise.fbm(px * 0.7 + 3.1, pz * 0.7, 2) - 0.5, wz = Noise.fbm(px * 0.7, pz * 0.7 - 5.3, 2) - 0.5;
+            double v = Noise.fbm(px * 2.2 + wx * 1.2, pz * 2.2 + wz * 1.2, 4);
+            double edge = 1 - coverage;
+            return Math.clamp((v - edge) / Math.max(0.05, 1 - edge) * 1.6, 0, 1);
+        }
+
+        /** Cloud density at a point: flat bases, rounded tops where the cloud is thickest, eroded edges. */
+        private double cloudDensity(double x, double y, double z, boolean detail) {
+            double hf = (y - CLOUD_BOTTOM) / (CLOUD_TOP - CLOUD_BOTTOM);
+            if (hf <= 0 || hf >= 1) return 0;
+            double c = cloudCover(x, z);
+            double shape = c * 1.3 - hf * hf * 1.15 - 0.08;
+            shape *= smoothstep(0, 0.07, hf);
+            if (shape <= 0) return 0;
+            if (detail) {
+                double n = Noise.fbm3((x + windX * 1.3) / 140, y / 140, (z + windZ * 1.3) / 140, 2);
+                shape -= (n - 0.25) * 0.45 * (1 - Math.min(1, shape * 1.5));
+            }
+            return Math.clamp(shape * 1.8, 0, 1);
         }
 
         /** Sunlight let through by the clouds above a point. */
         double cloudShadow(double x, double y, double z) {
             // With a low sun, cloud shadows would stretch for kilometres into streaks; fade them out instead.
-            double strength = 0.7 * smoothstep(0.18, 0.45, atm.sy);
-            if (coverage <= 0 || strength <= 0 || y >= CLOUD_ALTITUDE) return 1;
-            double t = (CLOUD_ALTITUDE - y) / atm.sy;
-            return 1 - strength * cloudAlpha(x + atm.sx * t, z + atm.sz * t);
-        }
-
-        private double cloudAlpha(double x, double z) {
-            double px = (x + windX) / 1100.0, pz = (z + windZ) / 1100.0;
-            // Domain warping breaks up the regular blobs into cumulus-like shapes.
-            double wx = Noise.fbm(px * 0.7 + 3.1, pz * 0.7, 3) - 0.5, wz = Noise.fbm(px * 0.7, pz * 0.7 - 5.3, 3) - 0.5;
-            double v = Noise.fbm(px + wx * 1.4, pz + wz * 1.4, 6);
-            double edge = 1 - coverage;
-            return smoothstep(edge - 0.03, edge + 0.13, v);
+            double strength = 0.75 * smoothstep(0.18, 0.45, atm.sy);
+            if (coverage <= 0 || strength <= 0 || y >= CLOUD_BOTTOM) return 1;
+            double t = ((CLOUD_BOTTOM + CLOUD_TOP) * 0.4 - y) / atm.sy;
+            return 1 - strength * smoothstep(0.02, 0.35, cloudCover(x + atm.sx * t, z + atm.sz * t));
         }
     }
 
@@ -791,6 +1196,32 @@ final class RealisticShader {
             double u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
             double a = hash(xi, yi, 0), b = hash(xi + 1, yi, 0), c = hash(xi, yi + 1, 0), d = hash(xi + 1, yi + 1, 0);
             return (a + (b - a) * u) * (1 - v) + (c + (d - c) * u) * v;
+        }
+
+        static double value3(double x, double y, double z) {
+            int xi = Mth.floor(x), yi = Mth.floor(y), zi = Mth.floor(z);
+            double fx = x - xi, fy = y - yi, fz = z - zi;
+            double u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy), w = fz * fz * (3 - 2 * fz);
+            double a = lerp(u, hash(xi, yi, zi), hash(xi + 1, yi, zi)), b = lerp(u, hash(xi, yi + 1, zi), hash(xi + 1, yi + 1, zi));
+            double c = lerp(u, hash(xi, yi, zi + 1), hash(xi + 1, yi, zi + 1)), d = lerp(u, hash(xi, yi + 1, zi + 1), hash(xi + 1, yi + 1, zi + 1));
+            return lerp(w, lerp(v, a, b), lerp(v, c, d));
+        }
+
+        private static double lerp(double t, double a, double b) {
+            return a + (b - a) * t;
+        }
+
+        static double fbm3(double x, double y, double z, int octaves) {
+            double sum = 0, amp = 0.5, norm = 0;
+            for (int o = 0; o < octaves; o++) {
+                sum += value3(x, y, z) * amp;
+                norm += amp;
+                x = x * 2.03 + 17.1;
+                y = y * 2.03 + 4.3;
+                z = z * 2.03 - 9.7;
+                amp *= 0.5;
+            }
+            return sum / norm;
         }
 
         static double fbm(double x, double y, int octaves) {

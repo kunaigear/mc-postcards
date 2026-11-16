@@ -15,12 +15,13 @@ import java.awt.image.DataBufferInt;
  * Distant (LOD) terrain for the simple shader and for no shader, drawn where Camera Obscura shows sky. Blocks get
  * their baked textures and the same lighting formula Camera Obscura uses up close (face shading, sky and block light,
  * corner shading), plus the simple shader's sun shadows, warm light and haze, so they match the near terrain. Traced
- * per supersample like the near terrain is drawn. Runs before the simple shader, so its grade and bloom apply too.
+ * per supersample like the near terrain is drawn, and shows through glass and water drawn over the background.
+ * Runs before the simple shader, so its grade and bloom apply too.
  */
 final class LodSimple {
     private LodSimple() {}
 
-    static void apply(BufferedImage image, SimpleShader.Frame f, LodTerrain lod, Level level,
+    static void apply(BufferedImage image, SimpleShader.Frame f, LodTerrain lod, SeeThrough seeThrough, Level level,
                       DailyCamsConfig.ShaderSettings st, boolean shaderOn, double lodFar) {
         int w = image.getWidth(), h = image.getHeight();
         int[] px = ((DataBufferInt) image.getRaster().getDataBuffer()).getData();
@@ -41,19 +42,15 @@ final class LodSimple {
         LodTerrain.Hit hit = new LodTerrain.Hit(), shadowHit = new LodTerrain.Hit();
         Vector3d tmp = new Vector3d();
         double[] tint = new double[3], alb = new double[3];
-        // Angle of one supersample, for choosing texture detail.
-        tmp.set(0.5 / fbW * 2 - 1, 0, 1);
-        Vector3d a0 = f.inverseViewProjection().transformProject(new Vector3d(tmp)).sub(cam).normalize();
-        Vector3d a1 = f.inverseViewProjection().transformProject(new Vector3d(1.5 / fbW * 2 - 1, 0, 1)).sub(cam).normalize();
-        double sampleAngle = Math.acos(Math.clamp(a0.dot(a1), -1, 1));
+        double sampleAngle = f.sampleAngle();
 
         for (int y = 0; y < h; y++) {
             Throttle.checkpoint();
             int fbYBase = (h - 1 - y) * scale;
             for (int x = 0; x < w; x++) {
+                // Change to the pixel's colour, summed over its samples.
                 double nr = 0, ng = 0, nb = 0;
                 int replaced = 0;
-                double oldR = 0, oldG = 0, oldB = 0;
                 for (int sy2 = 0; sy2 < scale; sy2++) {
                     int row = (fbYBase + sy2) * fbW + x * scale;
                     for (int sx2 = 0; sx2 < scale; sx2++) {
@@ -67,23 +64,27 @@ final class LodSimple {
                         double[] c = shade(lod, hit, shadowHit, cam, dx, dy, dz, sampleAngle, daylight, sunUp, sx, sy,
                                 st, shaderOn, tint, alb);
                         double dist = hit.water ? hit.waterT : hit.t;
-                        // The simple shader's haze, and the end of the distant terrain fading into the sky colour.
+                        // The simple shader's haze, and the end of the distant terrain fading into the sky (clouds
+                        // included) that Camera Obscura drew behind it.
                         double haze = shaderOn ? st.haze * (1 - Math.exp(-dist / 120.0)) : 0;
-                        haze = Math.min(1, haze + RealisticShader.smoothstep(lodFar * 0.55, lodFar * 0.99, dist));
-                        nr += c[0] + (fogR - c[0]) * haze;
-                        ng += c[1] + (fogG - c[1]) * haze;
-                        nb += c[2] + (fogB - c[2]) * haze;
-                        int old = color[row + sx2];
-                        oldR += ((old >> 16) & 255) / 255.0; oldG += ((old >> 8) & 255) / 255.0; oldB += (old & 255) / 255.0;
+                        double border = RealisticShader.smoothstep(lodFar * 0.55, lodFar * 0.99, dist);
+                        // Replace the background, also behind glass and water drawn over it (only the part that
+                        // shows through).
+                        int idx = row + sx2;
+                        int old = seeThrough.behind(idx, color[idx]);
+                        double t = seeThrough.transmittance(idx) * (1 - border);
+                        nr += (c[0] + (fogR - c[0]) * haze - ((old >> 16) & 255) / 255.0) * t;
+                        ng += (c[1] + (fogG - c[1]) * haze - ((old >> 8) & 255) / 255.0) * t;
+                        nb += (c[2] + (fogB - c[2]) * haze - (old & 255) / 255.0) * t;
                         replaced++;
                     }
                 }
                 if (replaced == 0) continue;
                 int i = y * w + x, p = px[i];
                 double k = 1.0 / samples;
-                double r = ((p >> 16) & 255) / 255.0 + (nr - oldR) * k;
-                double g = ((p >> 8) & 255) / 255.0 + (ng - oldG) * k;
-                double b = (p & 255) / 255.0 + (nb - oldB) * k;
+                double r = ((p >> 16) & 255) / 255.0 + nr * k;
+                double g = ((p >> 8) & 255) / 255.0 + ng * k;
+                double b = (p & 255) / 255.0 + nb * k;
                 px[i] = 0xFF000000 | to8(r) << 16 | to8(g) << 8 | to8(b);
             }
         }

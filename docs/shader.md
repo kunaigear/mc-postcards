@@ -8,7 +8,7 @@ players don't need anything for them. They're unrelated to Iris shader packs on 
 | `"shader"` | Look | Extra time per camera (1080p, 2-core host) |
 |---|---|---|
 | `simple` (default) | Camera Obscura's picture with sun shadows, warm light, haze, bloom and a colour grade. | about 6 s |
-| `realistic` | Relit from scratch, in the style of shader packs like Photon: physical sky, soft shadows, water reflections, filmic colour. | about 16 s |
+| `realistic` | Relit from scratch, in the style of shader packs like Photon: physical sky, volumetric clouds, soft shadows, sun rays, reflections in water, filmic colour. | about 20 s |
 | `none` | Camera Obscura's plain picture. | – |
 
 Choose one for every camera with `"shader"` in the config, or for one camera with
@@ -25,17 +25,23 @@ lights the scene again from scratch:
 - **A physically based sky.** Sunlight is scattered by the air (blue sky), by haze (the bright glow around the
   sun) and absorbed by an ozone layer (the deep blue at dusk), in an Earth-sized atmosphere. Sunrise and sunset
   colour the sky, the sunlight and everything it lights.
-- **Clouds** that change from day to day and with the weather, lit by the sun, with darker bases. They also cast
-  soft shadows on the land when the sun is high.
+- **Volumetric clouds.** Cumulus clouds between y 900 and 1500, with flat bases and rounded tops, ray marched
+  through the layer. Light from the sun is followed through each cloud, so they're bright where the sun hits them,
+  grey underneath, and get a silver edge when you look towards the sun. They change from day to day and with the
+  weather, and cast soft shadows on the land when the sun is high.
 - **Sunlight and shadows.** Rays are traced through the world's blocks towards the sun (or the moon at night).
   Shadow edges are softened, and leaves let some light through, so tree shadows are dappled and backlit leaves glow.
 - **Sky light** with the actual colour of the sky, weakened in shade, under overhangs and in corners. Torches,
   lanterns and other light sources give off warm light, and glow.
-- **Water** reflects the sky and the sun, has small waves, and gets darker and bluer the deeper it is.
+- **Water** reflects what's around it: trees, hills and distant terrain that are in the picture, and the sky and
+  clouds where the reflection leaves the picture. Gentle waves break up the reflections near the camera and calm
+  down further away. It gets darker and bluer the deeper it is, and the ground in shallow water shows caustics,
+  the bright lines of sunlight focused by the waves.
+- **Sun rays.** Looking towards a low sun, light streams through gaps in trees, terrain and clouds.
 - **Distance haze** that matches the sky, and the edge of the loaded world fades into it.
 - **Exposure and colour like a camera.** The picture is computed in high dynamic range and exposed automatically
   for the land (the sky stays bright, sunsets don't blow out), then tone mapped with AgX, a filmic curve that keeps
-  bright colours from clipping. A little bloom, a slight vignette.
+  bright colours from clipping. A little bloom, a slight vignette and some sharpening.
 
 Nights are dark, but not pitch black: the exposure brightens dark scenes a little (up to `maxExposure`), a little
 light is always there (`minLight`), and dim areas shift towards night vision: bluer and less colourful. The moon
@@ -65,12 +71,16 @@ The realistic shader is tuned with `realisticSettings`:
 | `clarity` | `0.3` | 0–1 | Local contrast: brings out detail and makes surfaces stand out from their surroundings. |
 | `vignette` | `0.12` | 0–1 | Darkening towards the corners. |
 | `waterReflections` | `1.0` | 0–2 | Strength of reflections on water (1 = physically based). |
+| `sunRays` | `1.0` | 0–3 | Strength of the sun rays (0 = off). |
+| `sharpness` | `0.35` | 0–1 | Sharpening of the finished picture (0 = off). |
 
 ### Cost
 
 On the 2-core test host, the realistic shader took 16 s for a 1080p picture, against 6 s for the simple one, under
-the same CPU limit as the rest of the render. TPS stayed at 20 and no tick took longer than 25 ms. It needs about
-150 MB of extra memory at 1080p, and about 4× that at 4K.
+the same CPU limit as the rest of the render. TPS stayed at 20 and no tick took longer than 25 ms. The clouds,
+reflections and sun rays added since make it about a third slower (4.9 s to 6.5 s for the same 1080p view on a
+desktop CPU without a limit), so expect about 20 s on that host. It needs about 150 MB of extra memory at 1080p,
+and about 4× that at 4K.
 
 The realistic shader replaces Camera Obscura's sky, clouds and fog with its own.
 

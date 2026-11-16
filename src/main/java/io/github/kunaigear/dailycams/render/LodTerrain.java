@@ -40,6 +40,10 @@ final class LodTerrain {
     private static final int IN_FLIGHT = 24;
     /** How far a ray follows water downwards before calling it deep. */
     private static final int MAX_WATER_STEPS = 48;
+    /** While the server is busy, still read one chunk this often, so a server that is always busy finishes too. */
+    private static final long BUSY_READ_NANOS = 1_000_000_000L;
+    /** Reading stops after this long; the picture then has the distant terrain read so far. */
+    private static final long MAX_READ_NANOS = 300_000_000_000L;
 
     final int minX, minZ, sizeX, sizeZ, minCx, minCz, chunksX, chunksZ;
     private final int minY, minSection;
@@ -82,14 +86,17 @@ final class LodTerrain {
     }
 
     /**
-     * Reads the saved chunks in the camera's view between {@code near} and {@code far} blocks. Runs on the render
-     * thread; reads go through the server's chunk IO, a few at a time, and wait while the server is busy.
+     * Reads the saved chunks in the camera's view out to {@code far} blocks: every chunk column whose blocks, anywhere
+     * between the bottom and the top of the world, are within {@code halfAngle} (radians) of the view direction.
+     * Runs on the render thread; reads go through the server's chunk IO, a few at a time, and mostly wait while the
+     * server is busy.
      */
-    static @Nullable LodTerrain build(ServerLevel level, double camX, double camZ, float yaw, double horizontalFov,
-                                      double near, double far) {
+    static @Nullable LodTerrain build(ServerLevel level, double camX, double camY, double camZ, float yaw, float pitch,
+                                      double halfAngle, double far) {
         long start = System.nanoTime();
-        double fx = -Math.sin(Math.toRadians(yaw)), fz = Math.cos(Math.toRadians(yaw));
-        double halfAngle = horizontalFov / 2 + Math.toRadians(8);
+        double cosP = Math.cos(Math.toRadians(pitch));
+        double fx = -Math.sin(Math.toRadians(yaw)) * cosP, fy = -Math.sin(Math.toRadians(pitch)), fz = Math.cos(Math.toRadians(yaw)) * cosP;
+        double yLow = level.getMinY() - camY, yHigh = level.getMaxY() + 1 - camY;
         int ccx = Mth.floor(camX) >> 4, ccz = Mth.floor(camZ) >> 4, r = (int) Math.ceil(far / 16) + 1;
         List<ChunkPos> wanted = new ArrayList<>();
         int minCx = Integer.MAX_VALUE, minCz = Integer.MAX_VALUE, maxCx = Integer.MIN_VALUE, maxCz = Integer.MIN_VALUE;
@@ -97,9 +104,14 @@ final class LodTerrain {
             for (int dz = -r; dz <= r; dz++) {
                 double vx = (ccx + dx) * 16 + 8 - camX, vz = (ccz + dz) * 16 + 8 - camZ;
                 double d = Math.sqrt(vx * vx + vz * vz);
-                if (d < near - 24 || d > far + 12) continue;
-                double angle = Math.acos(Math.clamp((vx * fx + vz * fz) / Math.max(d, 1e-6), -1, 1));
-                if (angle > halfAngle + Math.atan(12 / Math.max(d, 1))) continue;
+                if (d > far + 12) continue;
+                // The chunk column is wanted if some point of its centre line is in view (with the chunk's half
+                // width as a margin). Along the line, the angle to the view direction is smallest at y = fy d² / a.
+                double a = vx * fx + vz * fz;
+                double best = Math.max(cosTo(a, fy, d, yLow), cosTo(a, fy, d, yHigh));
+                if (a > 0) best = Math.max(best, cosTo(a, fy, d, Math.clamp(fy * d * d / a, yLow, yHigh)));
+                double angle = Math.acos(Math.clamp(best, -1, 1));
+                if (d > 12 && angle > halfAngle + Math.atan(12 / d)) continue;
                 wanted.add(new ChunkPos(ccx + dx, ccz + dz));
                 minCx = Math.min(minCx, ccx + dx); maxCx = Math.max(maxCx, ccx + dx);
                 minCz = Math.min(minCz, ccz + dz); maxCz = Math.max(maxCz, ccz + dz);
@@ -113,12 +125,21 @@ final class LodTerrain {
         Deque<CompletableFuture<Optional<CompoundTag>>> inFlight = new ArrayDeque<>();
         Deque<ChunkPos> inFlightPos = new ArrayDeque<>();
         int next = 0;
+        long lastRequest = 0;
         while (next < wanted.size() || !inFlight.isEmpty()) {
+            long now = System.nanoTime();
+            if (next < wanted.size() && now - start > MAX_READ_NANOS) {
+                DailyCams.LOGGER.warn("LOD: reading distant terrain took over {} s; using the {} of {} chunks read so far",
+                        MAX_READ_NANOS / 1_000_000_000L, next, wanted.size());
+                next = wanted.size();
+            }
             while (next < wanted.size() && inFlight.size() < IN_FLIGHT) {
-                if (DailyCams.serverBusy()) break; // don't compete with the server's own chunk IO
+                // Don't compete with the server's own chunk IO, but keep trickling while it's busy.
+                if (DailyCams.serverBusy() && now - lastRequest < BUSY_READ_NANOS) break;
                 ChunkPos p = wanted.get(next++);
                 inFlight.add(storage.dailycams$readChunk(p));
                 inFlightPos.add(p);
+                lastRequest = now;
             }
             if (inFlight.isEmpty()) {
                 sleep(50);
@@ -138,6 +159,11 @@ final class LodTerrain {
         DailyCams.LOGGER.info("LOD: read {} of {} chunks for distant terrain in {} ms", lod.chunks, wanted.size(),
                 (System.nanoTime() - start) / 1_000_000);
         return lod.chunks > 0 ? lod : null;
+    }
+
+    /** Cosine of the angle between the view direction and the point {@code y} above (below) the camera on a column. */
+    private static double cosTo(double horizontalDot, double fy, double d, double y) {
+        return (horizontalDot + fy * y) / Math.max(Math.sqrt(d * d + y * y), 1e-6);
     }
 
     private static int dist2(ChunkPos p, int cx, int cz) {

@@ -34,7 +34,16 @@ final class SimpleShader {
     private static final int MAX_SHADOW_STEPS = 160;
 
     record Frame(Framebuffer framebuffer, int scale, Matrix4d inverseViewProjection, Vector3d camera,
-                 double fogStart, double fogEnd, int fogColor) {}
+                 double fogStart, double fogEnd, int fogColor) {
+        /** Angle covered by one supersample at the centre of the picture, for choosing distant texture detail. */
+        double sampleAngle() {
+            int fbW = framebuffer.width, cx = fbW / 2;
+            Vector3d a = inverseViewProjection.transformProject(new Vector3d((cx + 0.5) / fbW * 2 - 1, 0, 1)).sub(camera);
+            Vector3d b = inverseViewProjection.transformProject(new Vector3d((cx + 1.5) / fbW * 2 - 1, 0, 1)).sub(camera);
+            // atan2 of the cross and dot products stays accurate for tiny angles, where acos of the dot would not.
+            return Math.atan2(a.cross(b, new Vector3d()).length(), a.dot(b));
+        }
+    }
 
     static void apply(BufferedImage image, Frame f, Level level, DailyCamsConfig.ShaderSettings st) {
         int w = image.getWidth(), h = image.getHeight();
