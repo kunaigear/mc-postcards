@@ -5,7 +5,7 @@
   "name": "Postcards",
   "description": "Players place virtual cameras with /postcard set. Every day the server renders what each camera sees and posts the picture to a webhook.",
   "authors": ["kunaigear"],
-  "license": ["MIT", "AGPL-3.0-only"],
+  "license": "AGPL-3.0-only",
   "contact": {
     "homepage": "https://github.com/kunaigear/mc-postcards",
     "sources": "https://github.com/kunaigear/mc-postcards",

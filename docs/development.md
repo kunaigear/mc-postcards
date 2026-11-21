@@ -208,9 +208,8 @@ Under `src/main/java/io/github/kunaigear/postcards/`:
 `obscura/` started as Camera Obscura's renderer, with its camera items, video, commands and presets left out.
 Postcards' hooks are written into it directly: the throttle, culling and draw order in the pipeline, recording for
 the realistic shader in the rasterizer, and the block, light and model caches in the meshing. Camera Obscura is
-licensed under the AGPL-3.0, so these files keep that license and their notice, and the release jar as a whole is
-under the AGPL-3.0 (`LICENSE-AGPL`). The AGPL asks that players can get the source, so `/postcard` links to it. The
-rest of Postcards stays MIT.
+licensed under the AGPL-3.0, like all of Postcards, and these files keep the notice that names it as their origin.
+The AGPL asks that players can get the source, so `/postcard` links to it.
 
 ## Releasing
 

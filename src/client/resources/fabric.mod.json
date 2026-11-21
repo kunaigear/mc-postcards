@@ -5,7 +5,7 @@
   "name": "Postcards Client",
   "description": "Optional client helper for Postcards: /postcard set uses your FOV setting, and with a freecam mod places the camera where your view is, not where your body is.",
   "authors": ["kunaigear"],
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "contact": {
     "homepage": "https://github.com/kunaigear/mc-postcards",
     "sources": "https://github.com/kunaigear/mc-postcards",
