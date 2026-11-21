@@ -92,6 +92,9 @@ val clientJar = tasks.register<Jar>("clientJar") {
 
 tasks.assemble { dependsOn(clientJar) }
 
+// -PbenchFreeze, or -PbenchFreeze=true, for the render benchmark.
+val benchFreeze = (findProperty("benchFreeze")?.toString() ?: "false") != "false"
+
 loom {
     mods {
         register("dailycams") { sourceSet(sourceSets.main.get()) }
@@ -121,12 +124,16 @@ loom {
             property("dailycams.benchmark.maxHitches", bench("benchMaxHitches", "-1"))
             property("dailycams.benchmark.minTps", bench("benchMinTps", "-1"))
             property("dailycams.benchmark.label", bench("benchLabel", ""))
+            property("dailycams.benchmark.rounds", bench("benchRounds", "1"))
+            property("dailycams.benchmark.freeze", benchFreeze.toString())
         }
     }
 }
 
 tasks.matching { it.name == "runBenchmark" }.configureEach {
     val dir = file("run/benchmark")
+    val port = findProperty("benchPort")?.toString() ?: "25570"
+    val cpuShare = findProperty("benchCpuShare")?.toString()
     doFirst {
         dir.resolve("config/dailycams").mkdirs()
         dir.resolve("eula.txt").writeText("eula=true\n")
@@ -134,8 +141,13 @@ tasks.matching { it.name == "runBenchmark" }.configureEach {
         if (!properties.exists()) {
             properties.writeText("level-seed=12345\nonline-mode=false\nserver-port=25570\npause-when-empty-seconds=-1\nmax-tick-time=-1\n")
         }
+        properties.writeText(properties.readText().replace(Regex("(?m)^server-port=.*$"), "server-port=$port"))
         // The defaults of the build under test, without a daily schedule that could start renders of its own.
-        dir.resolve("config/dailycams/config.json").writeText("{\"scheduleTimes\": []}\n")
+        val config = mutableListOf("\"scheduleTimes\": []")
+        cpuShare?.let { config += "\"renderCpuShare\": ${it.toDoubleOrNull() ?: throw GradleException("-PbenchCpuShare must be a number, not '$it'")}" }
+        // Lossless pictures for comparing pixels, never falling back to JPEG for size.
+        if (benchFreeze) config += listOf("\"imageFormat\": \"png\"", "\"maxUploadBytes\": 1000000000")
+        dir.resolve("config/dailycams/config.json").writeText(config.joinToString(", ", "{", "}\n"))
         dir.resolve("benchmark-result.txt").delete()
     }
     doLast {
