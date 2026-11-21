@@ -5,20 +5,26 @@ import io.github.kunaigear.dailycams.camera.CameraSpec;
 import io.github.kunaigear.dailycams.render.LodCache;
 import io.github.kunaigear.dailycams.render.RenderQueue;
 import com.sun.management.GarbageCollectionNotificationInfo;
+import com.sun.management.ThreadMXBean;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.level.storage.ServerLevelData;
 import net.minecraft.world.phys.AABB;
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.imageio.ImageIO;
 import javax.management.NotificationEmitter;
 import javax.management.openmbean.CompositeData;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -30,7 +36,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.HexFormat;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -57,13 +65,19 @@ final class Benchmark {
     private static final int SETTLE_SECONDS = 10, IDLE_SECONDS = 30;
     /** A tick that starts this long after the previous one (two ticks' worth) is a hitch players can notice. */
     private static final double HITCH_MS = 100;
+    /** Water and clouds move with the game time, so a frozen world pins it. */
+    private static final long FROZEN_GAME_TIME = 1_000_000;
     /** Present once the world has its terrain; delete the world to prepare it again. */
     private static final String PREPARED_MARKER = "world/dailycams-benchmark-prepared";
 
+    private static final ThreadMXBean THREADS = (ThreadMXBean) ManagementFactory.getThreadMXBean();
+
     private final MinecraftServer server;
-    private int mobs, maxHitches, minTps;
+    private int mobs, maxHitches, minTps, rounds;
     private final String label = System.getProperty("dailycams.benchmark.label", "");
+    private final boolean freeze = Boolean.getBoolean("dailycams.benchmark.freeze");
     private volatile Stage current;
+    private volatile long renderThreadId = -1;
 
     private Benchmark(MinecraftServer server) {
         this.server = server;
@@ -80,14 +94,29 @@ final class Benchmark {
 
     private static final class Stage {
         final String name;
-        final boolean render;
+        final int round;
+        final @Nullable Camera camera;
+        final @Nullable String shader;
         final List<TickProfiler.Tick> ticks = Collections.synchronizedList(new ArrayList<>());
         final List<Long> gcPausesMs = Collections.synchronizedList(new ArrayList<>());
+        /** Render thread CPU time per render stage, sampled at the end of each tick. */
+        final Map<String, Long> cpuByState = Collections.synchronizedMap(new LinkedHashMap<>());
         long startNanos, nanos;
+        @Nullable Path picture;
+        /** Of the picture's decoded pixels, in a frozen world. */
+        @Nullable String pictureHash;
+        /** On the render thread. */
+        long cpuNanos, allocatedBytes, lastTickCpuNanos;
 
-        Stage(String name, boolean render) {
+        Stage(String name, int round, @Nullable Camera camera, @Nullable String shader) {
             this.name = name;
-            this.render = render;
+            this.round = round;
+            this.camera = camera;
+            this.shader = shader;
+        }
+
+        boolean render() {
+            return camera != null;
         }
 
         int hitches() {
@@ -135,31 +164,66 @@ final class Benchmark {
     private void run() {
         String result;
         StringBuilder report = new StringBuilder();
+        List<Stage> stages = new ArrayList<>();
         try {
             mobs = intProperty("mobs", 200);
             maxHitches = intProperty("maxHitches", -1);
             minTps = intProperty("minTps", -1);
+            rounds = intProperty("rounds", 1);
+            if (rounds < 1) throw new IllegalArgumentException("-PbenchRounds must be at least 1");
             TickProfiler.listener = tick -> {
                 Stage s = current;
-                if (s != null) s.ticks.add(tick);
+                if (s == null) return;
+                s.ticks.add(tick);
+                if (tick.state().equals("idle") || tick.state().equals("loading")) return;
+                long cpu = renderThreadUsage()[0];
+                s.cpuByState.merge(tick.state(), cpu - s.lastTickCpuNanos, Long::sum);
+                s.lastTickCpuNanos = cpu;
             };
             listenForGc();
             setScene();
             if (!Files.exists(Path.of(PREPARED_MARKER))) prepare();
             spawnMobs();
+            if (freeze) {
+                command("tick freeze");
+                onServer(() -> {
+                    ((ServerLevelData) server.overworld().getLevelData()).setGameTime(FROZEN_GAME_TIME);
+                    return null;
+                });
+            }
             Thread.sleep(SETTLE_SECONDS * 1000L);
 
-            List<Stage> stages = new ArrayList<>();
-            stages.add(measure("idle", false, () -> sleep(IDLE_SECONDS)));
+            // A frozen server has nothing to compare against.
+            if (!freeze) stages.add(measure("idle", 0, null, null, s -> sleep(IDLE_SECONDS)));
+            // Killed cows saved by an earlier run stay in the pen, mid-death, while the world is frozen.
             int mobsAlive = onServer(() -> server.overworld().getEntities(EntityTypes.COW,
-                    new AABB(PEN_MIN, PEN_FLOOR, PEN_MIN, PEN_MAX + 1, PEN_FLOOR + 5, PEN_MAX + 1), e -> true).size());
-            for (String shader : SHADERS) {
-                for (Camera cam : CAMERAS) stages.add(measure(cam.name + " " + shader, true, () -> render(cam, shader)));
+                    new AABB(PEN_MIN, PEN_FLOOR, PEN_MIN, PEN_MAX + 1, PEN_FLOOR + 5, PEN_MAX + 1), e -> e.isAlive()).size());
+            for (int round = 1; round <= rounds; round++) {
+                // Every round starts like the first, reading the distant terrain of the first shader from disk.
+                LodCache.clear();
+                for (String shader : SHADERS) {
+                    for (Camera cam : CAMERAS) {
+                        String name = cam.name + " " + shader + (rounds > 1 ? " #" + round : "");
+                        stages.add(measure(name, round, cam, shader, s -> s.picture = render(cam, shader)));
+                    }
+                }
             }
             command("kill @e[tag=" + MOB_TAG + "]");
+            if (freeze) {
+                command("tick unfreeze");
+                for (Stage s : stages) if (s.render()) s.pictureHash = pixelHash(s.picture);
+            }
 
             result = verdict(stages);
-            report.append(header(mobsAlive)).append(table(stages)).append("\n").append(result).append("\n");
+            report.append(header(mobsAlive)).append(table(stages)).append("\n");
+            if (freeze) {
+                report.append("Pictures (hash of the pixels, file):\n");
+                for (Stage s : stages) {
+                    if (s.render()) report.append(String.format(Locale.ROOT, "%-21s %s %s%n", s.name, s.pictureHash, s.picture));
+                }
+                report.append("\n");
+            }
+            report.append(result).append("\n");
         } catch (Throwable e) {
             LOG.error("Benchmark failed", e);
             result = "FAIL: " + e;
@@ -173,6 +237,7 @@ final class Benchmark {
             Path file = Path.of("reports", stamp + (label.isBlank() ? "" : "_" + label.replaceAll("[^A-Za-z0-9._-]", "_")) + ".txt");
             Files.createDirectories(file.getParent());
             Files.writeString(file, report);
+            if (!stages.isEmpty()) Files.writeString(file.resolveSibling(file.getFileName().toString().replace(".txt", ".csv")), csv(stages));
             Files.writeString(Path.of("benchmark-result.txt"), result.startsWith("PASS") ? "PASS" : result);
             LOG.info("Report saved to {}", file.toAbsolutePath());
         } catch (Exception e) {
@@ -234,7 +299,8 @@ final class Benchmark {
         });
     }
 
-    private void render(Camera cam, String shader) {
+    /** Returns the saved picture. */
+    private Path render(Camera cam, String shader) {
         var done = new CompletableFuture<RenderQueue.Result>();
         boolean queued = onServer(() -> {
             CameraSpec spec = DailyCams.get().cameras().get(cam.name).copy();
@@ -245,20 +311,55 @@ final class Benchmark {
         if (!queued) throw new IllegalStateException("Could not queue camera " + cam.name);
         RenderQueue.Result result = done.join();
         if (!result.success()) throw new IllegalStateException("Camera " + cam.name + ": " + result.message());
+        if (result.localFile() == null) throw new IllegalStateException("Camera " + cam.name + ": no picture was saved");
+        return result.localFile().toAbsolutePath();
     }
 
-    private Stage measure(String name, boolean render, Runnable work) {
+    /** PNG only: a JPEG can hide a small change in the pixels. */
+    private static String pixelHash(Path picture) {
+        if (!picture.toString().endsWith(".png")) throw new IllegalStateException(picture + " isn't a PNG");
+        try {
+            var image = ImageIO.read(picture.toFile());
+            int[] pixels = image.getRGB(0, 0, image.getWidth(), image.getHeight(), null, 0, image.getWidth());
+            ByteBuffer bytes = ByteBuffer.allocate(8 + pixels.length * 4);
+            bytes.putInt(image.getWidth()).putInt(image.getHeight()).asIntBuffer().put(pixels);
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes.array()), 0, 8);
+        } catch (Exception e) {
+            throw new IllegalStateException("Could not read " + picture, e);
+        }
+    }
+
+    private Stage measure(String name, int round, @Nullable Camera camera, @Nullable String shader, Consumer<Stage> work) {
         LOG.info("Measuring: {}", name);
-        Stage stage = new Stage(name, render);
+        Stage stage = new Stage(name, round, camera, shader);
+        long[] before = renderThreadUsage();
+        stage.lastTickCpuNanos = before[0];
         stage.startNanos = System.nanoTime();
         current = stage;
         try {
-            work.run();
+            work.accept(stage);
         } finally {
             current = null;
             stage.nanos = System.nanoTime() - stage.startNanos;
+            long[] after = renderThreadUsage();
+            stage.cpuNanos = after[0] - before[0];
+            stage.allocatedBytes = after[1] - before[1];
         }
         return stage;
+    }
+
+    /**
+     * CPU time and allocated bytes of the render thread so far, or zeros before its first render. Rendering work
+     * on other threads, such as the server reading chunks and distant terrain from disk, isn't counted.
+     */
+    private long[] renderThreadUsage() {
+        if (renderThreadId < 0) {
+            for (Thread t : Thread.getAllStackTraces().keySet()) {
+                if (t.getName().equals("DailyCams-Render")) renderThreadId = t.threadId();
+            }
+            if (renderThreadId < 0) return new long[]{0, 0};
+        }
+        return new long[]{THREADS.getThreadCpuTime(renderThreadId), THREADS.getThreadAllocatedBytes(renderThreadId)};
     }
 
     /** Collectors whose events are whole cycles rather than pauses (ZGC, Shenandoah) are left out. */
@@ -275,7 +376,7 @@ final class Benchmark {
     }
 
     private String verdict(List<Stage> stages) {
-        List<Stage> renders = stages.stream().filter(s -> s.render).toList();
+        List<Stage> renders = stages.stream().filter(Stage::render).toList();
         int hitches = renders.stream().mapToInt(Stage::hitches).sum();
         int worst = renders.stream().mapToInt(Stage::worstSecondTps).filter(t -> t >= 0).min().orElse(-1);
         List<String> failures = new ArrayList<>();
@@ -297,7 +398,10 @@ final class Benchmark {
                 + "Host:   " + runtime.availableProcessors() + " CPUs seen by the JVM, CPU quota " + cpuQuota()
                 + ", heap " + runtime.maxMemory() / (1024 * 1024) + " MiB, " + gcs + ", Java " + Runtime.version() + "\n"
                 + "Scene:  seed " + server.overworld().getSeed() + ", " + mobsAlive + " cows in force-loaded chunks, cameras "
-                + CAMERAS.stream().map(Camera::name).collect(Collectors.joining(", ")) + "\n"
+                + CAMERAS.stream().map(Camera::name).collect(Collectors.joining(", ")) + ", renderCpuShare "
+                + DailyCams.get().config().renderCpuShare + (rounds > 1 ? ", " + rounds + " rounds" : "") + "\n"
+                + (freeze ? "Frozen: ticks frozen and game time " + FROZEN_GAME_TIME + ", for comparing pictures.\n" : "")
+                + "cpu and alloc are the render thread's; chunk loading runs on the server thread and isn't in them.\n"
                 + "A hitch is a tick that started more than " + (int) HITCH_MS + " ms after the one before it.\n\n";
     }
 
@@ -305,20 +409,21 @@ final class Benchmark {
         Set<String> renderStages = new LinkedHashSet<>();
         for (Stage s : stages) renderStages.addAll(s.renderStages().keySet());
         StringBuilder out = new StringBuilder();
-        out.append(String.format(Locale.ROOT, "%-18s %8s %7s %7s %8s %15s", "stage", "time", "hitches", "worst s", "longest", "GC pauses"));
+        out.append(String.format(Locale.ROOT, "%-21s %8s %7s %8s %7s %7s %8s %15s", "stage", "time", "cpu", "alloc", "hitches", "worst s", "longest", "GC pauses"));
         for (String r : renderStages) out.append(String.format(Locale.ROOT, " %9s", r));
         out.append("\n");
-        out.append(String.format(Locale.ROOT, "%-18s %8s %7s %7s %8s %15s", "", "", "", "TPS", "tick", "n / max / total"));
+        out.append(String.format(Locale.ROOT, "%-21s %8s %7s %8s %7s %7s %8s %15s", "", "", "", "", "", "TPS", "tick", "n / max / total"));
         out.append("\n");
         for (Stage s : stages) {
-            out.append(row(s.name, s.nanos / 1e9, s.hitches(), s.worstSecondTps(), s.longestTickMs(), s.gcPausesMs));
+            out.append(row(s.name, s.nanos / 1e9, s.cpuNanos / 1e9, s.allocatedBytes, s.hitches(), s.worstSecondTps(), s.longestTickMs(), s.gcPausesMs));
             Map<String, Double> times = s.renderStages();
-            if (s.render) for (String r : renderStages) out.append(String.format(Locale.ROOT, " %8.1fs", times.getOrDefault(r, 0.0) / 1000));
+            if (s.render()) for (String r : renderStages) out.append(String.format(Locale.ROOT, " %8.1fs", times.getOrDefault(r, 0.0) / 1000));
             out.append("\n");
         }
-        List<Stage> renders = stages.stream().filter(s -> s.render).toList();
+        List<Stage> renders = stages.stream().filter(Stage::render).toList();
         List<Long> gc = renders.stream().flatMap(s -> s.gcPausesMs.stream()).toList();
-        out.append(row("all renders", renders.stream().mapToDouble(s -> s.nanos / 1e9).sum(), renders.stream().mapToInt(Stage::hitches).sum(),
+        out.append(row("all renders", renders.stream().mapToDouble(s -> s.nanos / 1e9).sum(), renders.stream().mapToDouble(s -> s.cpuNanos / 1e9).sum(),
+                renders.stream().mapToLong(s -> s.allocatedBytes).sum(), renders.stream().mapToInt(Stage::hitches).sum(),
                 renders.stream().mapToInt(Stage::worstSecondTps).filter(t -> t >= 0).min().orElse(-1),
                 renders.stream().mapToDouble(Stage::longestTickMs).max().orElse(0), gc));
         for (String r : renderStages) {
@@ -328,15 +433,41 @@ final class Benchmark {
         return out.append("\n").toString();
     }
 
-    private static String row(String name, double seconds, int hitches, int worstTps, double longestMs, List<Long> gcPauses) {
+    private static String row(String name, double seconds, double cpuSeconds, long allocated, int hitches, int worstTps, double longestMs, List<Long> gcPauses) {
         List<Long> gc;
         synchronized (gcPauses) {
             gc = List.copyOf(gcPauses);
         }
         String pauses = gc.size() + " / " + gc.stream().mapToLong(Long::longValue).max().orElse(0) + " / "
                 + gc.stream().mapToLong(Long::longValue).sum();
-        return String.format(Locale.ROOT, "%-18s %7.1fs %7d %7s %6.0fms %15s", name, seconds, hitches,
+        return String.format(Locale.ROOT, "%-21s %7.1fs %6.2fs %6.2fGB %7d %7s %6.0fms %15s", name, seconds, cpuSeconds, allocated / 1e9, hitches,
                 worstTps < 0 ? "-" : String.valueOf(worstTps), longestMs, pauses);
+    }
+
+    /** One line per render, for scripts such as scripts/bench-compare.py. Times in s, CPU of the render thread. */
+    private static String csv(List<Stage> stages) {
+        List<Stage> renders = stages.stream().filter(Stage::render).toList();
+        Set<String> states = new LinkedHashSet<>();
+        for (Stage s : renders) states.addAll(s.renderStages().keySet());
+        StringBuilder out = new StringBuilder("round,camera,shader,picture,file,time,cpu,alloc_mb,hitches,worst_tps,longest_tick_ms,gc_pauses,gc_max_ms,gc_total_ms");
+        for (String st : states) out.append(",").append(st).append(",").append(st).append("_cpu");
+        out.append("\n");
+        for (Stage s : renders) {
+            List<Long> gc;
+            synchronized (s.gcPausesMs) {
+                gc = List.copyOf(s.gcPausesMs);
+            }
+            out.append(String.format(Locale.ROOT, "%d,%s,%s,%s,%s,%.3f,%.3f,%.1f,%d,%d,%.1f,%d,%d,%d", s.round, s.camera.name, s.shader,
+                    s.pictureHash == null ? "" : s.pictureHash, s.picture,
+                    s.nanos / 1e9, s.cpuNanos / 1e9, s.allocatedBytes / 1e6, s.hitches(), s.worstSecondTps(), s.longestTickMs(),
+                    gc.size(), gc.stream().mapToLong(Long::longValue).max().orElse(0), gc.stream().mapToLong(Long::longValue).sum()));
+            Map<String, Double> wall = s.renderStages();
+            for (String st : states) {
+                out.append(String.format(Locale.ROOT, ",%.3f,%.3f", wall.getOrDefault(st, 0.0) / 1000, s.cpuByState.getOrDefault(st, 0L) / 1e9));
+            }
+            out.append("\n");
+        }
+        return out.toString();
     }
 
     /** Strict, so a typo in a budget fails the run instead of turning the budget off. */

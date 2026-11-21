@@ -53,15 +53,19 @@ The report is printed at the end and saved in `run/benchmark/reports/`. It has o
 | Column | Meaning |
 |---|---|
 | time | From queueing the render until the picture was saved. |
+| cpu, alloc | CPU time and allocation of the render thread. Chunk loading runs on the server thread and isn't counted. |
 | hitches | Ticks that started more than 100 ms after the one before, which players can notice. |
 | worst s TPS | Ticks in the slowest full second. |
 | longest tick | The slowest tick, in ms. |
 | GC pauses | Count, longest and total, in ms. |
 | loading, building, drawing, lod, shading | Time in each render stage. Encoding counts as shading. |
 
+Next to each report is a `.csv` with one line per render, which also has the render thread's CPU time per stage.
+
 Every run uses the same scene and settings, with the build's default config minus the daily schedule, at noon in
 clear weather. Compare runs on the same machine and limits. The distant-terrain cache starts empty, so the first
-render of each camera reads the distant terrain from disk and the other two shaders read it from memory.
+render of each camera reads the distant terrain from disk and the other two shaders read it from memory. Each
+round of `-PbenchRounds` starts with an empty cache again.
 
 | Property | Default | What it does |
 |---|---|---|
@@ -71,6 +75,15 @@ render of each camera reads the distant terrain from disk and the other two shad
 | `-PbenchMaxHitches=<n>` | off | Fail if the renders together have more hitches than this. |
 | `-PbenchMinTps=<n>` | off | Fail if any full second during a render has fewer ticks than this. |
 | `-PbenchLabel=<text>` | – | Shown in the report and its file name. |
+| `-PbenchRounds=<n>` | 1 | Render all six scenes this many times. |
+| `-PbenchCpuShare=<share>` | the build's default | `renderCpuShare` for the renders. 1 turns the throttle off. |
+| `-PbenchPort=<port>` | 25570 | Server port, so two benchmarks can run at the same time. |
+| `-PbenchFreeze` | off | Freeze the world and record each picture, to check that two builds render the same pixels. |
+
+A frozen run stops ticking the world (`tick freeze`) once the cows are in place and fixes the game time, which moves
+water and clouds. Every render of a scene then gets the same pixels. Pictures are saved as PNG, since a JPEG can hide
+a small change, and the report lists a hash of each picture's pixels next to its file. The cows stand still, so the
+server has less to do: use frozen runs to compare pictures and render cost, not hitches or TPS.
 
 When a budget is broken, the task fails with the reason. `-XX:ActiveProcessorCount` only tells the JVM how many
 threads to plan for; the server can still use every core of the machine. To really take CPU time away, run it in a
@@ -86,6 +99,48 @@ one-core host.
 
 The server keeps its GC log in `run/benchmark/gc.log` (replaced on every run) and allows deep JFR stacks, so a
 profile can be taken while it runs: `jcmd <pid> JFR.start settings=profile filename=render.jfr`.
+
+### Comparing two builds
+
+```
+scripts/bench-compare.py --base main
+```
+
+This checks whether a change made renders more expensive or changed a picture. It measures the working tree,
+uncommitted changes included, against `--base` (or `--candidate <ref>` against it). Each side gets a worktree next
+to this checkout, so you can keep editing while it runs. Both sides run a frozen benchmark at the same time, in
+pairs, each pinned to its own CPU cores with `taskset`, with `renderCpuShare` 1 and 3 rounds. The prepared world in
+`run/benchmark/world` is copied to both sides before every pair. Three pairs on 2 cores each need 5 CPUs and take
+about 15 minutes, longer when one side is much slower, since each pair waits for its slower side. The results are
+saved in `run/benchmark/compare/`.
+
+The summary has the ratio of render-thread CPU time, allocation and wall time per scene, with a 95% interval, and
+whether each scene's pictures are identical. The script exits with 1 when:
+
+- render CPU is higher with 95% confidence and the ratio is above 1 + `--tolerance` (2%),
+- a scene's pictures differ between the two builds, unless you pass `--pictures-may-differ`. Both pictures are
+  copied to `pictures/` in the results,
+- or a build rendered a scene differently in two of its own renders, which means the world wasn't frozen.
+
+What the measurements showed:
+
+- The first round of each server is left out. It runs while the JIT is still compiling and takes up to 50% more CPU.
+- Two servers running the same code differ by a few percent in CPU time, while rounds within one server agree
+  closely. The interval is therefore over pairs, not rounds, and more pairs narrow it, more rounds don't.
+- With three pairs on the same code, CPU ratios were within 1% of 1. The intervals were ±1–4% per scene and ±1% for
+  all renders together. A smaller change needs more pairs to show.
+- Allocation isn't judged. Some servers settle into JIT code that allocates up to a third more for the same work,
+  from the first round to the last, so a few pairs can't tell that apart from a real change. Read it as a hint, and
+  use more pairs or a JFR allocation profile to confirm one.
+- Wall time isn't judged either. Side by side, the servers share the disk, and the busy back-off pauses each render
+  at different times.
+- Both sides run the candidate's `src/devtest`, so a change to the benchmark itself doesn't skew the result. The base
+  needs the benchmark options above in its `build.gradle.kts`.
+- It measures cost and pictures, not smoothness. Hitches and TPS depend on the cows and on everything else the
+  machine does, so check them with `runBenchmark` and its budgets, one run at a time.
+
+The script refuses to start while another benchmark server is running. Comparing a commit with itself
+(`--base HEAD --candidate HEAD`) shows how noisy the machine is.
 
 ## Documentation pictures
 
