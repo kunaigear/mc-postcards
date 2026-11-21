@@ -7,23 +7,23 @@ import org.jetbrains.annotations.Nullable;
  * Glass and water that Camera Obscura drew over empty background, so distant terrain can show through them. Camera
  * Obscura doesn't write depth for translucent surfaces, so those framebuffer samples still look empty afterwards.
  * Kept per sample: the colour behind the first such surface, and how much of it still shows through (0-255).
- * Only active on the render thread while {@link #ACTIVE} is set.
+ * Only active on the render thread while {@link #active} is set.
  */
 public final class SeeThrough {
-    private static final ThreadLocal<SeeThrough> ACTIVE = new ThreadLocal<>();
+    private static @Nullable SeeThrough active;
 
     private final Int2IntOpenHashMap behind = new Int2IntOpenHashMap(), transmit = new Int2IntOpenHashMap();
 
     public static @Nullable SeeThrough active() {
-        return ACTIVE.get();
+        return RenderFlags.rendering() ? active : null;
     }
 
     void activate() {
-        ACTIVE.set(this);
+        active = this;
     }
 
     static void deactivate() {
-        ACTIVE.remove();
+        active = null;
     }
 
     /** A translucent fragment with this alpha is about to be blended over {@code dst} at an empty sample. */

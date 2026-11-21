@@ -121,6 +121,7 @@ final class CameraRenderer {
                 } finally {
                     GBuffer.deactivate();
                     SeeThrough.deactivate();
+                    CommandCulling.end();
                     RenderFlags.noFog(false);
                 }
                 long drawMs = (System.nanoTime() - drawStart) / 1_000_000;

@@ -1,5 +1,6 @@
 package io.github.kunaigear.dailycams.mixin;
 
+import io.github.kunaigear.dailycams.render.CommandCulling;
 import io.github.kunaigear.dailycams.render.GBuffer;
 import io.github.kunaigear.dailycams.render.RenderFlags;
 import io.github.kunaigear.dailycams.render.SeeThrough;
@@ -19,7 +20,8 @@ import org.spongepowered.asm.mixin.injection.At;
  * For the "realistic" shader: records what Camera Obscura's terrain shader is drawing at each pixel into the
  * active {@link GBuffer}, and turns off Camera Obscura's own fog (the shader adds its own haze, and distant
  * terrain continues where the fog would end the picture). For distant terrain, also records glass and water drawn
- * over empty background ({@link SeeThrough}). Does nothing unless one of those is active on this thread.
+ * over empty background ({@link SeeThrough}). Does nothing unless one of those is active on this thread. During our
+ * renders, also tells {@link CommandCulling} where fragments were drawn.
  */
 @Mixin(value = SoftwareRasterizer.class, remap = false)
 public abstract class SoftwareRasterizerMixin {
@@ -30,6 +32,7 @@ public abstract class SoftwareRasterizerMixin {
             target = "Lde/tomalbrc/cameraobscura/sore/shader/Shader;fragment(Lde/tomalbrc/cameraobscura/sore/shader/FragmentIn;Lde/tomalbrc/cameraobscura/sore/Uniforms;)I"))
     private int dailycams$recordFragment(Shader shader, FragmentIn in, Uniforms uniforms, Operation<Integer> original,
                                          @Local(name = "idx") int idx) {
+        if (RenderFlags.rendering()) CommandCulling.drawn(idx);
         GBuffer gbuffer = GBuffer.active();
         if ((gbuffer == null && !RenderFlags.noFog()) || !(shader instanceof MatteShader)) return original.call(shader, in, uniforms);
         double fogStart = uniforms.fogStart, fogEnd = uniforms.fogEnd;
