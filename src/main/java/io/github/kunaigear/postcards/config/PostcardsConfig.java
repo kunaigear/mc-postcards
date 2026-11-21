@@ -203,8 +203,8 @@ public final class PostcardsConfig {
     }
 
     private void validate() {
-        width = Mth.clamp(width, 16, 3840);
-        height = Mth.clamp(height, 16, 2160);
+        width = Mth.clamp(width, 16, 7680);
+        height = Mth.clamp(height, 16, 4320);
         fov = Mth.clamp(fov, 30, 110);
         renderDistance = Mth.clamp(renderDistance, 2, 32);
         ssaa = Mth.clamp(ssaa, 1, 4);

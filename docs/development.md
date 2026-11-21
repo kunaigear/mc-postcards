@@ -77,6 +77,7 @@ round of `-PbenchRounds` starts with an empty cache again.
 | `-PbenchLabel=<text>` | – | Shown in the report and its file name. |
 | `-PbenchRounds=<n>` | 1 | Render all six scenes this many times. |
 | `-PbenchCpuShare=<share>` | the build's default | `renderCpuShare` for the renders. 1 turns the throttle off. |
+| `-PbenchWidth=<px>`, `-PbenchHeight=<px>` | the build's default | Picture size, for example `3840` and `2160` for 4K. |
 | `-PbenchPort=<port>` | 25570 | Server port, so two benchmarks can run at the same time. |
 | `-PbenchFreeze` | off | Freeze the world and record each picture, to check that two builds render the same pixels. |
 
