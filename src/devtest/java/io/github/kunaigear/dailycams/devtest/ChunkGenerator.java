@@ -11,7 +11,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * `dcgen <x> <z> <yaw> <radius>` (console): generates the chunks in a 140° wedge in front of a point, out to
@@ -20,7 +23,8 @@ import java.util.Deque;
 final class ChunkGenerator {
     private static final Logger LOG = LoggerFactory.getLogger("DCGEN");
     private static final Deque<ChunkPos> queue = new ArrayDeque<>();
-    private static final java.util.List<ChunkPos> inFlight = new java.util.ArrayList<>();
+    private static final List<ChunkPos> inFlight = new ArrayList<>();
+    private static final List<CompletableFuture<Void>> waiting = new ArrayList<>();
     private static net.minecraft.server.level.TicketType ticket;
     private static int done, total;
     private static long lastLog;
@@ -43,6 +47,14 @@ final class ChunkGenerator {
                                                             return 1;
                                                         })))))));
         ServerTickEvents.END_SERVER_TICK.register(server -> tick(server.overworld()));
+    }
+
+    /** Like the command. Server thread only. Completes when every chunk queued so far is generated. */
+    static CompletableFuture<Void> generate(int x, int z, float yaw, int radius) {
+        start(x, z, yaw, radius);
+        var finished = new CompletableFuture<Void>();
+        waiting.add(finished);
+        return finished;
     }
 
     private static void start(int x, int z, float yaw, int radius) {
@@ -81,6 +93,8 @@ final class ChunkGenerator {
             LOG.info("dcgen done: {} chunks", total);
             total = 0;
             done = 0;
+            waiting.forEach(f -> f.complete(null));
+            waiting.clear();
         }
     }
 }
