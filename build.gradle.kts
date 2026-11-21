@@ -130,6 +130,9 @@ tasks.matching { it.name == "runBenchmark" }.configureEach {
     val dir = file("run/benchmark")
     val port = findProperty("benchPort")?.toString() ?: "25570"
     val cpuShare = findProperty("benchCpuShare")?.toString()
+    val size = listOf("benchWidth" to "width", "benchHeight" to "height").mapNotNull { (property, key) ->
+        findProperty(property)?.let { "\"$key\": ${it.toString().toIntOrNull() ?: throw GradleException("-P$property must be a whole number, not '$it'")}" }
+    }
     doFirst {
         dir.resolve("config/postcards").mkdirs()
         dir.resolve("eula.txt").writeText("eula=true\n")
@@ -141,6 +144,7 @@ tasks.matching { it.name == "runBenchmark" }.configureEach {
         // The defaults of the build under test, without a daily schedule that could start renders of its own.
         val config = mutableListOf("\"scheduleTimes\": []")
         cpuShare?.let { config += "\"renderCpuShare\": ${it.toDoubleOrNull() ?: throw GradleException("-PbenchCpuShare must be a number, not '$it'")}" }
+        config += size
         // Lossless pictures for comparing pixels, never falling back to JPEG for size.
         if (benchFreeze) config += listOf("\"imageFormat\": \"png\"", "\"maxUploadBytes\": 1000000000")
         dir.resolve("config/postcards/config.json").writeText(config.joinToString(", ", "{", "}\n"))

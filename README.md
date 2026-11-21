@@ -7,8 +7,8 @@
 
 - **Server-side only:** no bot account joins and players don't need any mods. Vanilla clients work.
   An optional client helper places cameras with [Freecam and the player's own FOV](docs/usage.md#client-helper-freecam-and-your-field-of-view).
-- **Real 3D renders**, made on the server by a renderer based on [Camera Obscura](https://github.com/tomalbrc/camera-obscura): 1920×1080,
-  16 chunks of view distance, with a choice of two built-in shaders: a light one with sun shadows, or a
+- **Real 3D renders**, made on the server by a renderer based on [Camera Obscura](https://github.com/tomalbrc/camera-obscura): 1920×1080 by default
+  and up to 8K, 16 chunks of view distance, with a choice of two built-in shaders: a light one with sun shadows, or a
   [realistic one](docs/shader.md#realistic) with a physical sky, soft shadows and water reflections.
 - **Distant terrain** out to 64 chunks, like Voxy: far hills, coasts and mountains from the saved world.
 - **One camera per player**, named after them. Staff can add named cameras.
