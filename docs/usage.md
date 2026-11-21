@@ -48,8 +48,6 @@ permission API, so LuckPerms and similar mods can grant these nodes instead of o
 | `/postcard reload` | admin | Reloads the config and `cameras.json`. |
 | `/postcard help` | everyone | Shows the commands available to you. |
 
-Before the mod was renamed to Postcards the command was `/dailycam`, or `/dcam` for short. Both still work.
-
 If you leave out `[name]`, the command uses your personal camera. From the server console, always give a name
 (and, for `/postcard set`, a position and rotation).
 

@@ -51,10 +51,6 @@ public final class DevTest implements ModInitializer {
         as(server, level, alice, "postcard fov 90");
         as(server, level, alice, "postcard info");
         as(server, level, alice, "postcard list");
-        as(server, level, alice, "dcam list");
-        as(server, level, alice, "dcam set Alice 10 100 10 90 0");
-        as(server, level, alice, "dcam");
-        as(server, level, alice, "dailycam list");
         as(server, level, alice, "postcard set Alice 10 100 10 90 0 85");
         as(server, level, alice, "postcard set Alice 10 100 10 90 0 200");
         as(server, level, alice, "postcard info");

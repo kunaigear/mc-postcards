@@ -15,7 +15,6 @@ import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Locale;
-import java.util.Set;
 
 /**
  * Fills in what only the client knows when a player places a camera with {@code /postcard set}:
@@ -33,8 +32,8 @@ import java.util.Set;
  * command list the server sent to this client and only adds what that server understands.
  */
 public final class PostcardsClient implements ClientModInitializer {
-    /** The server's command and its old names, and the subcommand that places a camera. */
-    private static final Set<String> COMMANDS = Set.of("postcard", "dailycam", "dcam");
+    /** The server's command, and the subcommand that places a camera. */
+    private static final String COMMAND = "postcard";
     private static final String SET = "set";
 
     /** Token counts: "postcard set [name]" has no position, "postcard set name x y z yaw pitch" has one but no fov. */
@@ -50,7 +49,7 @@ public final class PostcardsClient implements ClientModInitializer {
 
     static String rewrite(String command) {
         String[] args = command.trim().split("\\s+");
-        if (args.length < 2 || !COMMANDS.contains(args[0]) || !args[1].equals(SET)) {
+        if (args.length < 2 || !args[0].equals(COMMAND) || !args[1].equals(SET)) {
             return command;
         }
         Minecraft mc = Minecraft.getInstance();
@@ -103,7 +102,6 @@ public final class PostcardsClient implements ClientModInitializer {
             ClientPacketListener connection = mc.getConnection();
             if (connection == null) return NONE;
             CommandNode<?> node = connection.getCommands().getRoot().getChild(root);
-            if (node != null && node.getRedirect() != null) node = node.getRedirect(); // an old name, like /dcam
             CommandNode<?> rotation = child(child(child(child(node, SET), "name"), "pos"), "rotation");
             return new ServerSupport(rotation != null, child(rotation, "fov") != null);
         }
