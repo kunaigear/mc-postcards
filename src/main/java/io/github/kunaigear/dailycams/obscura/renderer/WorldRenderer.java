@@ -80,7 +80,6 @@ public class WorldRenderer {
         camera.setPosition(x, y, z);
         camera.setTargetFromYawPitch(yaw, Math.clamp(pitch, -89.9f, 89.9f));
         camera.setUp(0, 1, 0);
-        this.environmentValues = EnvironmentValues.fromLevel(level, camera.position());
     }
 
     /** The projection times the view matrix, exactly as the pipeline works it out for the frame. */
@@ -105,6 +104,7 @@ public class WorldRenderer {
     }
 
     public BufferedImage render() {
+        this.environmentValues = EnvironmentValues.fromLevel(level, camera.position());
         long time = level.getGameTime();
         double sunAngle = this.environmentValues.sunAngle;
         double lightFactor = this.environmentValues.lightFactor;

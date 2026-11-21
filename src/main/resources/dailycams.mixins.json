@@ -4,7 +4,9 @@
   "package": "io.github.kunaigear.dailycams.mixin",
   "mixins": [
     "ChunkMapInvoker",
-    "ChunkMapMixin"
+    "ChunkMapMixin",
+    "LivingEntityMixin",
+    "WardenMixin"
   ],
   "server": [
     "DedicatedServerMixin"

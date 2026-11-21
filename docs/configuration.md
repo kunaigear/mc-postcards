@@ -48,7 +48,7 @@ Every post is an embed with the picture, the camera name, its coordinates and di
 | `lodDistance` | `64` | How far [distant terrain](distant-terrain.md) reaches, in chunks. `0` turns it off. |
 | `lodCacheMegabytes` | `256` | Memory for keeping distant terrain between renders, so it isn't read from disk again. `0` turns it off. See [Distant terrain](distant-terrain.md#cache). |
 | `ssaa` | `2` | Supersampling factor for smoother edges (1 = off). |
-| `renderEntities` | `true` | Whether mobs, players and other entities appear in pictures. |
+| `renderEntities` | `true` | Whether mobs, players and other entities appear in pictures. Taken from Camera Obscura's config (`config/cameraobscura/config.json`) the first time, if it's there. |
 | `shader` | `"simple"` | `simple`, `realistic` or `none`. See [Shaders](shader.md). |
 | `shaderSettings` | | Settings of the simple shader. See [Shaders](shader.md#settings-1). |
 | `realisticSettings` | | Settings of the realistic shader (exposure, night brightness, clouds…). See [Shaders](shader.md#settings). |

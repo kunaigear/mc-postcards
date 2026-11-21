@@ -201,7 +201,7 @@ Under `src/main/java/io/github/kunaigear/dailycams/`:
 | `obscura/` | The software renderer: a modified copy of [Camera Obscura](https://github.com/tomalbrc/camera-obscura) 2.1.4+26.3, under the AGPL-3.0 (see below). |
 | `schedule/` | The daily schedule. |
 | `webhook/` | The Discord and generic webhook upload. |
-| `mixin/` | Hooks into the server: keep it awake while rendering, chunk saves for the distant terrain cache. |
+| `mixin/` | Hooks into the server: keep it awake while rendering, chunk saves for the distant terrain cache, and walk and warden animations, which only clients work out. |
 
 ### The renderer
 
