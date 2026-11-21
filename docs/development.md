@@ -161,9 +161,12 @@ dailycam set coast 9000.5 140 9000.5 30 20
 Then set the time, choose the shader with `dailycam shader <shader> <camera>`, and run `dailycam test <camera>`.
 Renders land in `config/dailycams/renders/<camera>/`.
 
+The realistic shader's clouds change from one in-game day to the next. A time of 24000 or more is on a later day:
+`30000` is noon on day 1, which has fewer clouds than day 0.
+
 | Image | Camera | Time | Settings |
 |---|---|---|---|
-| `village.jpg` | village | `noon` | simple shader |
+| `village.jpg` | village | `30000` | realistic shader |
 | `shader-comparison.jpg` | village | `noon` | `none` (left), `simple` (right) |
 | `render-distance.jpg` | village | `noon` | `renderDistance` 6 (left), 16 (right) |
 | `meadow.jpg` | cherry | `3500` | simple shader |
