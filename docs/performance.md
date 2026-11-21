@@ -35,7 +35,7 @@ queue is done.
 
 These come from an emulated small host: 2 CPU cores, 3 GB heap and 200 mobs in force-loaded chunks. Each test
 rendered one camera over already-generated terrain and one over new terrain. A hitch is a tick that started more
-than 100 ms late (two missed ticks), which players can notice.
+than 100 ms after the one before it (two ticks' worth), which players can notice.
 
 | | Hitches | Worst second | Longest GC pause | Time per camera |
 |---|---|---|---|---|
@@ -71,6 +71,33 @@ which stick out of their blocks, add about 4 s), and reading the distant terrain
 cache. There was about one hitch per render, each from a garbage collection pause of 55–105 ms: the render makes as
 much garbage as it always did, but in less time, so the collector has more to copy at once. The idle server had no
 hitches.
+
+### Weaker hosts
+
+These come from the [render benchmark](development.md#render-benchmark) on a 6-core desktop. It renders the village
+and peaks cameras with each shader, six renders in all, next to 200 cows. The idle server had no hitches in any of
+these setups. A core count only tells the JVM how many cores to plan for, with `-XX:ActiveProcessorCount`. A quota
+takes CPU time away through a cgroup, the way a small VPS or a container limit does.
+
+| Limits | Collector | Six renders | Hitches | Worst second | Longest tick | Longest GC pause |
+|---|---|---|---|---|---|---|
+| 4 cores | G1 | 331 s | 1 | 19 TPS | 58 ms | 81 ms |
+| 2 cores (two runs) | G1 | 330–337 s | 2–3 | 19 TPS | 88–96 ms | 78–531 ms |
+| 2 cores, 2 GB heap | G1 | 306 s | 5 | 19 TPS | 82 ms | 78 ms |
+| 1 core | Serial | 359 s | 12 | 15 TPS | 202 ms | 473 ms |
+| Quota of 2 cores | G1 | 323 s | 8 | 20 TPS | 220 ms | 90 ms |
+| Quota of 1 core | Serial | 354 s | 8 | 19 TPS | 449 ms | 444 ms |
+| Quota of half a core | Serial | 511 s | 47 | 3 TPS | 303 ms | 1167 ms |
+
+- Down to one core, a render takes about as long as with four: the render thread's `renderCpuShare` of one core sets
+  the pace, not the cores. With half a core, that share is half of all the CPU there is.
+- The worst hitches come from garbage collection. The server allocates about 40 MB/s with just the cows and about
+  155 MB/s while rendering. That is about 480 MB for every second of CPU time the render thread gets, and the
+  throttle only counts CPU time. With one CPU the JVM picks the Serial collector, which stops the server for every
+  collection. In those runs the realistic renders filled the old generation and caused a full collection of
+  0.4–1.2 s, and the young collections after it took 130–270 ms.
+- A real quota hurts more than fewer cores. The collector's threads, the render thread and the server share one
+  budget per 100 ms. When it runs out, every thread waits for the next period, even in the middle of a tick.
 
 ## Render distance
 
