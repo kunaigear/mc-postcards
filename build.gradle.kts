@@ -108,6 +108,40 @@ loom {
                 vmArgs("-XX:ActiveProcessorCount=2", "-Xmx3G", "-Xlog:gc:file=gc.log:uptime,level,tags")
             }
         }
+        // The render benchmark, see docs/development.md. Its own server folder and world, never `run/world`.
+        register("benchmark") {
+            server()
+            source(devtest)
+            runDir("run/benchmark")
+            val bench = { key: String, default: String -> findProperty(key)?.toString() ?: default }
+            vmArgs("-XX:ActiveProcessorCount=${bench("benchCores", "2")}", "-Xmx${bench("benchHeap", "3G")}",
+                   "-Xlog:gc:file=gc.log:uptime,level,tags:filecount=0", "-XX:FlightRecorderOptions:stackdepth=512")
+            property("dailycams.benchmark", "true")
+            property("dailycams.benchmark.mobs", bench("benchMobs", "200"))
+            property("dailycams.benchmark.maxHitches", bench("benchMaxHitches", "-1"))
+            property("dailycams.benchmark.minTps", bench("benchMinTps", "-1"))
+            property("dailycams.benchmark.label", bench("benchLabel", ""))
+        }
+    }
+}
+
+tasks.matching { it.name == "runBenchmark" }.configureEach {
+    val dir = file("run/benchmark")
+    doFirst {
+        dir.resolve("config/dailycams").mkdirs()
+        dir.resolve("eula.txt").writeText("eula=true\n")
+        val properties = dir.resolve("server.properties")
+        if (!properties.exists()) {
+            properties.writeText("level-seed=12345\nonline-mode=false\nserver-port=25570\npause-when-empty-seconds=-1\nmax-tick-time=-1\n")
+        }
+        // The defaults of the build under test, without a daily schedule that could start renders of its own.
+        dir.resolve("config/dailycams/config.json").writeText("{\"scheduleTimes\": []}\n")
+        dir.resolve("benchmark-result.txt").delete()
+    }
+    doLast {
+        val result = dir.resolve("benchmark-result.txt")
+        val text = if (result.exists()) result.readText().trim() else "no result; the server stopped early"
+        if (text != "PASS") throw GradleException("Benchmark: $text")
     }
 }
 

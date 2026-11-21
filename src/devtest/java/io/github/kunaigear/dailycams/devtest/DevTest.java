@@ -26,6 +26,7 @@ public final class DevTest implements ModInitializer {
     public void onInitialize() {
         TickProfiler.register();
         ChunkGenerator.register();
+        Benchmark.register();
         CommandRegistrationCallback.EVENT.register((dispatcher, registries, env) ->
                 dispatcher.register(Commands.literal("dctest").executes(ctx -> {
                     run(ctx.getSource().getServer());
