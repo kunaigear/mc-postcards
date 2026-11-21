@@ -4,6 +4,7 @@ package io.github.kunaigear.dailycams.render;
 public final class RenderFlags {
     private static final ThreadLocal<Boolean> NO_FOG = ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> BUSHY_LEAVES = ThreadLocal.withInitial(() -> false);
+    private static final ThreadLocal<Boolean> RENDERING = ThreadLocal.withInitial(() -> false);
 
     private RenderFlags() {}
 
@@ -25,5 +26,15 @@ public final class RenderFlags {
 
     static boolean bushyLeaves() {
         return BUSHY_LEAVES.get();
+    }
+
+    static void rendering(boolean on) {
+        if (on) RENDERING.set(true);
+        else RENDERING.remove();
+    }
+
+    /** Whether one of our renders runs on this thread. */
+    public static boolean rendering() {
+        return RENDERING.get();
     }
 }

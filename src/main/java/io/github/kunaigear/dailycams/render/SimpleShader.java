@@ -8,8 +8,6 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.attribute.EnvironmentAttributes;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LightLayer;
-import net.minecraft.world.level.block.LeavesBlock;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4d;
 import org.joml.Vector3d;
@@ -61,7 +59,8 @@ final class SimpleShader {
 
         ChunkMeshCache.FastBlockGetter blocks = new ChunkMeshCache.FastBlockGetter(level);
         var skyLight = level.getLightEngine().getLayerListener(LightLayer.SKY);
-        int maxY = level.getMaxY();
+        int maxY = LoadedChunks.highestBlock(level);
+        LightBlockers blockers = new LightBlockers(level);
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
 
         double fogR = ((f.fogColor() >> 16) & 255) / 255.0, fogG = ((f.fogColor() >> 8) & 255) / 255.0, fogB = (f.fogColor() & 255) / 255.0;
@@ -96,7 +95,7 @@ final class SimpleShader {
                     double sky = skyLight.getLightValue(cursor) / 15.0;
                     double weight = sky * sunUp * fog;
                     if (weight > 0) {
-                        if (inShadow(blocks, cursor, ox, oy, oz, sx, sy, sz, maxY)) {
+                        if (inShadow(blockers, ox, oy, oz, sx, sy, sz, maxY)) {
                             double s = st.shadowStrength * weight;
                             r *= 1 - s;
                             g *= 1 - s * 0.92;
@@ -125,8 +124,7 @@ final class SimpleShader {
     }
 
     /** Amanatides-Woo voxel walk towards the sun. True if an opaque block (or leaves) is in the way. */
-    private static boolean inShadow(ChunkMeshCache.FastBlockGetter blocks, BlockPos.MutableBlockPos cursor,
-                                    double ox, double oy, double oz, double dx, double dy, double dz, int maxY) {
+    private static boolean inShadow(LightBlockers blockers, double ox, double oy, double oz, double dx, double dy, double dz, int maxY) {
         int x = Mth.floor(ox), y = Mth.floor(oy), z = Mth.floor(oz);
         int stepX = dx > 0 ? 1 : -1, stepY = dy > 0 ? 1 : -1, stepZ = dz > 0 ? 1 : -1;
         double tDeltaX = dx == 0 ? Double.POSITIVE_INFINITY : Math.abs(1 / dx);
@@ -148,9 +146,7 @@ final class SimpleShader {
                 tMaxZ += tDeltaZ;
             }
             if (y > maxY) return false;
-            BlockState state = blocks.getBlockState(cursor.set(x, y, z));
-            if (state.isAir()) continue;
-            if (state.canOcclude() || state.getBlock() instanceof LeavesBlock) return true;
+            if (blockers.at(x, y, z) != LightBlockers.CLEAR) return true;
         }
         return false;
     }

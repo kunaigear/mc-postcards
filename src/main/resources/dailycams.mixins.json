@@ -8,6 +8,8 @@
     "FastBlockGetterInvoker",
     "ChunkMeshInvoker",
     "ChunkMapInvoker",
+    "ChunkMapMixin",
+    "FabricPlatformMixin",
     "PlayerRendererAccessor",
     "RPHelperMixin",
     "SoftwareRenderPipelineMixin",

@@ -3,12 +3,20 @@ package io.github.kunaigear.dailycams.mixin;
 import de.tomalbrc.cameraobscura.renderer.ChunkMeshCache;
 import net.minecraft.world.level.Level;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.gen.Accessor;
 import org.spongepowered.asm.mixin.gen.Invoker;
 
 @Mixin(value = ChunkMeshCache.class, remap = false)
 public interface ChunkMeshCacheInvoker {
     @Invoker("rebuildChunk")
     static void dailycams$rebuildChunk(Level level, ChunkMeshCache.ChunkMesh mesh) {
+        throw new AssertionError();
+    }
+
+    /** Camera Obscura's map of the loaded chunks, safe to read from any thread. */
+    @Accessor("VANILLA_CHUNKS")
+    static java.util.concurrent.ConcurrentHashMap<Level, java.util.concurrent.atomic.AtomicReference<
+            it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap<net.minecraft.world.level.chunk.ChunkAccess>>> dailycams$loadedChunks() {
         throw new AssertionError();
     }
 

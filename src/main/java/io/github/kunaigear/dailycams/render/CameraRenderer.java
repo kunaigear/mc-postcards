@@ -6,10 +6,15 @@ import io.github.kunaigear.dailycams.mixin.ChunkMeshInvoker;
 import de.tomalbrc.cameraobscura.renderer.ChunkMeshCache;
 import de.tomalbrc.cameraobscura.renderer.WorldRenderer;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import io.github.kunaigear.dailycams.config.DailyCamsConfig;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -45,6 +50,7 @@ final class CameraRenderer {
                                 LongSet missingColumns, @Nullable Entity hidden) {
         ViewVolume view = new ViewVolume(level, x, y, z, yaw, pitch, s);
         Throttle.begin(s.cpuShare());
+        RenderFlags.rendering(true);
         stage = "building";
         try {
             // Build fresh meshes for every section the renderer will look at. We never reuse Camera Obscura's
@@ -56,6 +62,7 @@ final class CameraRenderer {
             boolean realistic = "realistic".equals(s.shader());
             RenderFlags.bushyLeaves(realistic);
             Long2ObjectOpenHashMap<ChunkMeshCache.ChunkMesh> meshes = new Long2ObjectOpenHashMap<>();
+            Long2ReferenceOpenHashMap<ChunkAccess> chunks = LoadedChunks.of(level);
             for (int dx = -view.radius; dx <= view.radius; dx++) {
                 for (int dy = -view.radius; dy <= view.radius; dy++) {
                     for (int dz = -view.radius; dz <= view.radius; dz++) {
@@ -67,6 +74,7 @@ final class CameraRenderer {
                             visible = false;
                             skipped++;
                         }
+                        if (visible && emptyMesh(level, chunks, sx, sy, sz)) visible = false;
                         if (visible) {
                             ChunkMeshCacheInvoker.dailycams$rebuildChunk(level, mesh);
                             built++;
@@ -145,8 +153,47 @@ final class CameraRenderer {
             }
         } finally {
             RenderFlags.bushyLeaves(false);
+            RenderFlags.rendering(false);
             Throttle.end();
         }
+    }
+
+    /**
+     * Whether Camera Obscura would build an empty mesh for a section, found without looking at each of its 4096 blocks
+     * and their neighbours: it holds only air (an unloaded chunk reads as air too), or it's solid all through and so
+     * are the blocks touching it, so every block is hidden.
+     */
+    private static boolean emptyMesh(Level level, Long2ReferenceOpenHashMap<ChunkAccess> chunks, int sx, int sy, int sz) {
+        LevelChunkSection section = section(level, chunks, sx, sy, sz);
+        if (section == null || section.hasOnlyAir()) return true;
+        if (!allSolid(section)) return false;
+        for (Direction dir : Direction.values()) {
+            LevelChunkSection next = section(level, chunks, sx + dir.getStepX(), sy + dir.getStepY(), sz + dir.getStepZ());
+            if (next == null) return false;
+            if (allSolid(next)) continue;
+            // The layer of the next section that touches this one.
+            for (int a = 0; a < 16; a++) {
+                for (int b = 0; b < 16; b++) {
+                    int x = switch (dir) { case EAST -> 0; case WEST -> 15; default -> a; };
+                    int y = switch (dir) { case UP -> 0; case DOWN -> 15; default -> dir.getAxis() == Direction.Axis.X ? a : b; };
+                    int z = switch (dir) { case SOUTH -> 0; case NORTH -> 15; default -> b; };
+                    if (!next.getBlockState(x, y, z).isSolidRender()) return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /** A loaded section, or null outside the world or in an unloaded chunk (where Camera Obscura sees air). */
+    private static @Nullable LevelChunkSection section(Level level, Long2ReferenceOpenHashMap<ChunkAccess> chunks, int sx, int sy, int sz) {
+        ChunkAccess chunk = chunks.get(ChunkPos.pack(sx, sz));
+        if (chunk == null || sy < level.getMinSectionY() || sy > level.getMaxSectionY()) return null;
+        return chunk.getSection(chunk.getSectionIndexFromSectionY(sy));
+    }
+
+    /** Only solid blocks in the section's palette (which may also list blocks no longer in it, so false is a maybe). */
+    private static boolean allSolid(LevelChunkSection section) {
+        return !section.maybeHas(state -> !state.isSolidRender());
     }
 
     /**

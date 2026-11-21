@@ -102,7 +102,8 @@ final class RealisticShader {
 
         ChunkMeshCache.FastBlockGetter blocks = new ChunkMeshCache.FastBlockGetter(level);
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        int maxY = level.getMaxY();
+        int maxY = LoadedChunks.highestBlock(level);
+        LightBlockers blockers = new LightBlockers(level);
 
         // Pass 1: positions and shadows for every opaque pixel.
         float[] dist = new float[n], shadow = new float[n], vdx = new float[n], vdy = new float[n], vdz = new float[n];
@@ -141,7 +142,7 @@ final class RealisticShader {
                 if (lightUp <= 0 || GBuffer.sky(gb.light[i]) <= 0.01) continue;
                 double ndl = nx * lx + ny * ly + nz * lz;
                 if (ndl <= 0 && lastMat == SOLID) continue;
-                shadow[i] = (float) transmittanceToLight(blocks, cursor, tmp.x + nx * 0.03, tmp.y + ny * 0.03, tmp.z + nz * 0.03, lx, ly, lz, maxY);
+                shadow[i] = (float) transmittanceToLight(blockers, tmp.x + nx * 0.03, tmp.y + ny * 0.03, tmp.z + nz * 0.03, lx, ly, lz, maxY);
             }
         }
 
@@ -559,10 +560,11 @@ final class RealisticShader {
         double rl = Math.sqrt(rx * rx + ry * ry + rz * rz);
         rx /= rl; ry /= rl; rz /= rl;
         double[] refl = new double[3], scene = new double[3];
-        sky.radiance(rx, ry, rz, true, refl);
         double skyVis = Math.pow(skyLight, 2);
         // What the reflected ray hits on screen (trees, hills, distant terrain), where it finds something.
         double hit = fresnel > 0.003 ? ssr.trace(wx, wy, wz, rx, ry, rz, scene) : 0;
+        // The sky only shows in the reflection where that found nothing (its clouds are slow to compute).
+        if (hit < 1) sky.radiance(rx, ry, rz, true, refl);
         double[] up = new double[3];
         atm.ambient(0, 1, 0, up);
 
@@ -826,8 +828,8 @@ final class RealisticShader {
      * Fraction of light reaching a point (voxel walk; leaves let some light through). A point inside a leaf block
      * (an inner face, seen through the gaps of the leaves) gets the light through that block too.
      */
-    private static double transmittanceToLight(ChunkMeshCache.FastBlockGetter blocks, BlockPos.MutableBlockPos cursor,
-                                               double ox, double oy, double oz, double dx, double dy, double dz, int maxY) {
+    private static double transmittanceToLight(LightBlockers blockers, double ox, double oy, double oz,
+                                               double dx, double dy, double dz, int maxY) {
         int x = Mth.floor(ox), y = Mth.floor(oy), z = Mth.floor(oz);
         int stepX = dx > 0 ? 1 : -1, stepY = dy > 0 ? 1 : -1, stepZ = dz > 0 ? 1 : -1;
         double tDeltaX = dx == 0 ? Double.POSITIVE_INFINITY : Math.abs(1 / dx);
@@ -836,18 +838,17 @@ final class RealisticShader {
         double tMaxX = dx == 0 ? Double.POSITIVE_INFINITY : ((dx > 0 ? x + 1 - ox : ox - x) * tDeltaX);
         double tMaxY = dy == 0 ? Double.POSITIVE_INFINITY : ((dy > 0 ? y + 1 - oy : oy - y) * tDeltaY);
         double tMaxZ = dz == 0 ? Double.POSITIVE_INFINITY : ((dz > 0 ? z + 1 - oz : oz - z) * tDeltaZ);
-        double t = blocks.getBlockState(cursor.set(x, y, z)).getBlock() instanceof LeavesBlock ? LEAF_TRANSMITTANCE : 1;
+        double t = blockers.at(x, y, z) == LightBlockers.LEAVES ? LEAF_TRANSMITTANCE : 1;
         for (int i = 0; i < MAX_SHADOW_STEPS; i++) {
             if (tMaxX < tMaxY && tMaxX < tMaxZ) { x += stepX; tMaxX += tDeltaX; }
             else if (tMaxY < tMaxZ) { y += stepY; tMaxY += tDeltaY; }
             else { z += stepZ; tMaxZ += tDeltaZ; }
             if (y > maxY) return t;
-            BlockState state = blocks.getBlockState(cursor.set(x, y, z));
-            if (state.isAir()) continue;
-            if (state.getBlock() instanceof LeavesBlock) {
+            byte kind = blockers.at(x, y, z);
+            if (kind == LightBlockers.LEAVES) {
                 t *= LEAF_TRANSMITTANCE;
                 if (t < 0.04) return 0;
-            } else if (state.canOcclude()) {
+            } else if (kind == LightBlockers.OPAQUE) {
                 return 0;
             }
         }

@@ -32,6 +32,8 @@ dependencies {
                           "polymer-virtual-entity", "polymer-autohost")) {
         runtimeOnly("eu.pb4:$module:${p("polymer_version")}")
     }
+    // For a mixin into Camera Obscura's Polymer lookup. Camera Obscura brings Polymer at runtime.
+    compileOnly("eu.pb4:polymer-virtual-entity:${p("polymer_version")}")
 
 }
 
