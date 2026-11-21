@@ -112,9 +112,9 @@ Most of a render's time goes into building geometry for the chunks in view and d
 
 ## Resolution
 
-`width` and `height` go up to 7680×4320 (8K). The default is 1920×1080. Loading chunks, building geometry and reading
-distant terrain cost the same at any size. Drawing the frame and shading grow with the number of pixels, and
-`ssaa: 2` draws twice the width and height internally.
+`width` and `height` go up to 7680×4320 (8K). The default is 1920×1080. At the same aspect ratio, loading chunks,
+building geometry and reading distant terrain cost the same at any size. Drawing the frame and shading grow with the
+number of pixels, and `ssaa: 2` draws twice the width and height internally.
 
 From the [render benchmark](development.md#render-benchmark) with `-PbenchWidth=3840 -PbenchHeight=2160`, on
 2 cores with a 3 GB heap, two rounds each, against the same run at 1080p:
@@ -133,6 +133,7 @@ From the [render benchmark](development.md#render-benchmark) with `-PbenchWidth=
 - **Picture size:** a 4K JPEG was 2–3.8 MB, against 0.5–1.1 MB at 1080p, well within Discord's 10 MB limit.
 
 8K is for big servers. One round at 7680×4320 with a 14 GB heap took 115–193 s per render without a shader or with
-`simple`, and 404–449 s with `realistic`: 1471 s in all, 1.8× the 4K run. The heap peaked at 8 GB. One garbage
-collection during a realistic render paused the server for 2.2 s, and that render's longest tick took 4.2 s. The
-JPEGs were 5.8–7.8 MB, close to Discord's limit, so a busier scene may be sent at lower quality.
+`simple`, and 404–449 s with `realistic`: 1471 s for the six, against 404 s per round at 4K, about 3.6×. The heap
+peaked at 8 GB. One garbage collection during a realistic render paused the server for 2.2 s, and that render's
+longest tick took 4.2 s. The JPEGs were 5.8–7.8 MB, close to Discord's limit, so a busier scene may be sent at lower
+quality.
