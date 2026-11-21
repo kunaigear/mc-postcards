@@ -3,7 +3,7 @@
 [← Back to the README](../README.md)
 
 Rendering a picture is real work: the server loads the area around the camera, builds 3D geometry for it and draws
-it in software. Daily Cams does all of that in the background and gives way to the game whenever the server is
+it in software. Postcards does all of that in the background and gives way to the game whenever the server is
 busy. Renders take longer on a small server, but players shouldn't notice them.
 
 ## How a render works

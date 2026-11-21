@@ -2,7 +2,7 @@
 
 [← Back to the README](../README.md)
 
-Daily Cams runs only on the server. Players don't need it, and the only thing it sends them is chat messages.
+Postcards runs only on the server. Players don't need it, and the only thing it sends them is chat messages.
 Vanilla clients can join. The [client helper](usage.md#client-helper-freecam-and-your-field-of-view) (Freecam support and the player's own FOV) is optional.
 
 ## Tested mods
@@ -19,7 +19,7 @@ These ran together on a production Fabric 26.3 server (Loader 0.20.1), with a pl
 
 ModernFix had no 26.3 build at the time of testing.
 
-[Freecam](https://modrinth.com/mod/freecam) 1.5.1 on the client works with the optional Daily Cams client helper,
+[Freecam](https://modrinth.com/mod/freecam) 1.5.1 on the client works with the optional Postcards client helper,
 which places cameras at the freecam view. See the [client helper](usage.md#client-helper-freecam-and-your-field-of-view).
 
 ## Voxy
@@ -31,11 +31,11 @@ which places cameras at the freecam view. See the [client helper](usage.md#clien
 - **Distant terrain in multiplayer:** on its own, Voxy only builds LODs from terrain each player has loaded
   themselves. For distant terrain sent by the server, install
   [LOD Server Support](https://modrinth.com/mod/lod-server-support) on both the server and the clients. That mod
-  hasn't been tested with Daily Cams.
+  hasn't been tested with Postcards.
 
 ## Other mods
 
 - **Modded blocks** appear in pictures only if their models are in Polymer's resource pack.
-- **Camera Obscura** isn't needed: Daily Cams has its own copy of its renderer. Both can be installed together.
+- **Camera Obscura** isn't needed: Postcards has its own copy of its renderer. Both can be installed together.
 - **Permission mods** such as LuckPerms work through Fabric API's permission API. See the
   [permission nodes](usage.md#permission-tiers).

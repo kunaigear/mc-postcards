@@ -1,14 +1,19 @@
 {
   "schemaVersion": 1,
-  "id": "dailycams-client",
+  "id": "postcards-client",
   "version": "${version}",
-  "name": "Daily Cams Client",
-  "description": "Optional client helper for Daily Cams: /dailycam set uses your FOV setting, and with a freecam mod places the camera where your view is, not where your body is.",
+  "name": "Postcards Client",
+  "description": "Optional client helper for Postcards: /postcard set uses your FOV setting, and with a freecam mod places the camera where your view is, not where your body is.",
   "authors": ["kunaigear"],
   "license": "MIT",
+  "contact": {
+    "homepage": "https://github.com/kunaigear/mc-postcards",
+    "sources": "https://github.com/kunaigear/mc-postcards",
+    "issues": "https://github.com/kunaigear/mc-postcards/issues"
+  },
   "environment": "client",
   "entrypoints": {
-    "client": ["io.github.kunaigear.dailycams.client.DailyCamsClient"]
+    "client": ["io.github.kunaigear.postcards.client.PostcardsClient"]
   },
   "depends": {
     "fabricloader": ">=0.19.5",

@@ -2,7 +2,7 @@
 
 [← Back to the README](../README.md)
 
-Daily Cams has two built-in "shader packs". They run on the server after the renderer has drawn the picture, so
+Postcards has two built-in "shader packs". They run on the server after the renderer has drawn the picture, so
 players don't need anything for them. They're unrelated to Iris shader packs on players' clients.
 
 | `"shader"` | Look | Extra time per camera (1080p, 2-core host) |
@@ -12,7 +12,7 @@ players don't need anything for them. They're unrelated to Iris shader packs on 
 | `none` | The renderer's plain picture. | – |
 
 Choose one for every camera with `"shader"` in the config, or for one camera with
-`/dailycam shader <simple|realistic|none> [name]`. `default` makes a camera follow the config again.
+`/postcard shader <simple|realistic|none> [name]`. `default` makes a camera follow the config again.
 
 ![The same village at noon with each shader](images/shaders-noon.jpg)
 

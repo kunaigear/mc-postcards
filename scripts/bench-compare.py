@@ -30,7 +30,7 @@ def running_benchmarks():
     pids = []
     for proc in Path("/proc").iterdir():
         try:
-            if proc.name.isdigit() and b"-Ddailycams.benchmark=true" in (proc / "cmdline").read_bytes():
+            if proc.name.isdigit() and b"-Dpostcards.benchmark=true" in (proc / "cmdline").read_bytes():
                 pids.append(int(proc.name))
         except OSError:
             pass
@@ -163,7 +163,7 @@ def main():
 
     repo = Path(git("rev-parse", "--show-toplevel", cwd=Path.cwd()).strip())
     template = repo / "run/benchmark/world"
-    if not (template / "dailycams-benchmark-prepared").exists():
+    if not (template / "postcards-benchmark-prepared").exists():
         sys.exit(f"No prepared benchmark world in {template}; run ./gradlew runBenchmark once first")
     if pids := running_benchmarks():
         sys.exit(f"Another benchmark server is running (PID {', '.join(map(str, pids))}); results would be skewed")

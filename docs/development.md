@@ -12,15 +12,15 @@ You need JDK 25. Loom requires Gradle itself to run on Java 25.
 
 This builds two jars in `build/libs/`:
 
-- `daily-cams-<version>+<minecraft>.jar`: the server mod (`src/main`).
-- `daily-cams-client-<version>+<minecraft>.jar`: the optional client helper for Freecam and the player's FOV (`src/client`). It only
+- `postcards-<version>+<minecraft>.jar`: the server mod (`src/main`).
+- `postcards-client-<version>+<minecraft>.jar`: the optional client helper for Freecam and the player's FOV (`src/client`). It only
   depends on Fabric API and shares no code with the server mod.
 
 ## Test servers
 
 | Command | What it starts |
 |---|---|
-| `./gradlew runServer` | A development server in `run/` with Daily Cams and Polymer. |
+| `./gradlew runServer` | A development server in `run/` with Postcards and Polymer. |
 | `./gradlew runDevtestServer` | The same server plus a dev-only test mod (`src/devtest`). |
 | `./gradlew runDevtestServer -PsmallServer` | The same again, emulating a 2-core host with a 3 GB heap and a GC log (`run/gc.log`). |
 | `./gradlew runBenchmark` | The [render benchmark](#render-benchmark): its own server and world, renders a fixed scene, reports and stops. |
@@ -28,11 +28,11 @@ This builds two jars in `build/libs/`:
 
 The test mod is never part of the release jar. It adds:
 
-- **`dctest`** (console): runs the commands as fake players with op levels 0, 2 and 4 and logs every reply. It
+- **`pctest`** (console): runs the commands as fake players with op levels 0, 2 and 4 and logs every reply. It
   checks permission tiers, limits, name rules and username changes.
-- **A tick profiler:** `run/dctest-ticks.csv` gets one line per server tick, with its duration, the gap since the
+- **A tick profiler:** `run/pctest-ticks.csv` gets one line per server tick, with its duration, the gap since the
   previous tick, and what the renderer was doing (`idle`, `loading`, `building`, `drawing` or `shading`).
-- **`dcgen <x> <z> <yaw> <radius>`** (console): generates the chunks in a 140° wedge in front of a point, out to
+- **`pcgen <x> <z> <yaw> <radius>`** (console): generates the chunks in a 140° wedge in front of a point, out to
   `radius` chunks, so [distant terrain](distant-terrain.md) has something to show on a fresh world.
 
 ## Render benchmark
@@ -152,14 +152,14 @@ this in the console:
 gamerule advance_time false
 gamerule advance_weather false
 weather clear
-dailycam set village -169.5 81 -859.5 -30 25
-dailycam set cherry -415.5 137 768.5 -150 18
-dailycam set peaks -303.5 120 -79.5 135 -4
-dailycam set coast 9000.5 140 9000.5 30 20
+postcard set village -169.5 81 -859.5 -30 25
+postcard set cherry -415.5 137 768.5 -150 18
+postcard set peaks -303.5 120 -79.5 135 -4
+postcard set coast 9000.5 140 9000.5 30 20
 ```
 
-Then set the time, choose the shader with `dailycam shader <shader> <camera>`, and run `dailycam test <camera>`.
-Renders land in `config/dailycams/renders/<camera>/`.
+Then set the time, choose the shader with `postcard shader <shader> <camera>`, and run `postcard test <camera>`.
+Renders land in `config/postcards/renders/<camera>/`.
 
 The realistic shader's clouds change from one in-game day to the next. A time of 24000 or more is on a later day:
 `30000` is noon on day 1, which has fewer clouds than day 0.
@@ -183,7 +183,7 @@ The realistic shader's clouds change from one in-game day to the next. A time of
 | `lod-detail.jpg` | peaks | `noon` | the `lodDistance` 64 render, cropped to x 0–1100, y 300–820 |
 
 Distant terrain only shows chunks that exist. Before the distant-terrain pictures, generate the land in front of
-the cameras with the test mod: `dcgen -304 -80 135 64` for peaks and `dcgen -170 -860 -30 64` for village.
+the cameras with the test mod: `pcgen -304 -80 135 64` for peaks and `pcgen -170 -860 -30 64` for village.
 
 Pictures are scaled down from the renders: single ones to 1280 px wide (`village.jpg` to 1600 px), and each half of
 a side-by-side one to 960 px (800 px with a label for `shader-comparison.jpg` and `render-distance.jpg`), and each
@@ -191,11 +191,11 @@ third of `shaders-noon.jpg` and `shaders-sunset.jpg` to 640 px with a label.
 
 ## Project layout
 
-Under `src/main/java/io/github/kunaigear/dailycams/`:
+Under `src/main/java/io/github/kunaigear/postcards/`:
 
 | Path | Contents |
 |---|---|
-| `command/` | The `/dailycam` command and its `/dcam` alias. |
+| `command/` | The `/postcard` command and its old names `/dailycam` and `/dcam`. |
 | `camera/` | The camera model and `cameras.json`. |
 | `render/` | The render queue, chunk loading, the throttle, the shaders and distant terrain. |
 | `obscura/` | The software renderer: a modified copy of [Camera Obscura](https://github.com/tomalbrc/camera-obscura) 2.1.4+26.3, under the AGPL-3.0 (see below). |
@@ -206,15 +206,15 @@ Under `src/main/java/io/github/kunaigear/dailycams/`:
 ### The renderer
 
 `obscura/` started as Camera Obscura's renderer, with its camera items, video, commands and presets left out.
-Daily Cams' hooks are written into it directly: the throttle, culling and draw order in the pipeline, recording for
+Postcards' hooks are written into it directly: the throttle, culling and draw order in the pipeline, recording for
 the realistic shader in the rasterizer, and the block, light and model caches in the meshing. Camera Obscura is
 licensed under the AGPL-3.0, so these files keep that license and their notice, and the release jar as a whole is
-under the AGPL-3.0 (`LICENSE-AGPL`). The AGPL asks that players can get the source, so `/dailycam` links to it. The
-rest of Daily Cams stays MIT.
+under the AGPL-3.0 (`LICENSE-AGPL`). The AGPL asks that players can get the source, so `/postcard` links to it. The
+rest of Postcards stays MIT.
 
 ## Releasing
 
-Releases are built by the Gitea workflow in `.gitea/workflows/release.yml`.
+Releases are built by the GitHub Actions workflow in `.github/workflows/release.yml`.
 
 1. Set `mod_version` in `gradle.properties` and describe the release in `CHANGELOG.md`.
 2. Commit, then push a tag that matches: `git tag v1.2.3 && git push origin v1.2.3`.

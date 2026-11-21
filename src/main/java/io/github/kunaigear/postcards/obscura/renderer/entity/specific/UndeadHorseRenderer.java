@@ -1,0 +1,45 @@
+/*
+ * Derived from Camera Obscura 2.1.4+26.3 by tomalbrc (https://github.com/tomalbrc/camera-obscura).
+ * Copyright (c) 2026 tomalbrc. Modified for Postcards by kunaigear, November 2026.
+ * Licensed under the GNU Affero General Public License, version 3: see LICENSE-AGPL in the repository root.
+ */
+package io.github.kunaigear.postcards.obscura.renderer.entity.specific;
+
+import io.github.kunaigear.postcards.obscura.renderer.entity.ModelBakery;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.animal.equine.AbstractHorse;
+
+import java.util.HashMap;
+import java.util.Map;
+
+public class UndeadHorseRenderer extends AbstractEquineRenderer<AbstractHorse> {
+
+    private static final Map<EntityType<?>, String[]> TEXTURE_MAP = Map.of(
+            EntityTypes.SKELETON_HORSE, new String[]{
+                    "entity/horse/horse_skeleton",
+                    "entity/horse/horse_skeleton_baby"
+            },
+            EntityTypes.ZOMBIE_HORSE, new String[]{
+                    "entity/horse/horse_zombie",
+                    "entity/horse/horse_zombie_baby"
+            }
+    );
+
+    private final Map<String, ModelBakery.BakedPart> cache = new HashMap<>();
+
+    @Override
+    protected String getTexture(AbstractHorse entity) {
+        String[] paths = TEXTURE_MAP.get(entity.getType());
+        if (paths == null) return "entity/horse/horse_white"; // fallback
+        return entity.isBaby() ? paths[1] : paths[0];
+    }
+
+    @Override
+    public ModelBakery.BakedPart buildRoot(AbstractHorse entity) {
+        String tex = getTexture(entity);
+        return cache.computeIfAbsent(tex, k ->
+                entity.isBaby() ? buildBabyBase(k) : buildAdultBase(k)
+        );
+    }
+}
