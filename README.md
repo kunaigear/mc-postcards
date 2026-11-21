@@ -7,7 +7,7 @@
 
 - **Server-side only:** no bot account joins and players don't need any mods. Vanilla clients work.
   An optional client helper places cameras with [Freecam and the player's own FOV](docs/usage.md#client-helper-freecam-and-your-field-of-view).
-- **Real 3D renders**, made on the server by [Camera Obscura](https://modrinth.com/mod/camera-obscura): 1920×1080,
+- **Real 3D renders**, made on the server by a renderer based on [Camera Obscura](https://github.com/tomalbrc/camera-obscura): 1920×1080,
   16 chunks of view distance, with a choice of two built-in shaders: a light one with sun shadows, or a
   [realistic one](docs/shader.md#realistic) with a physical sky, soft shadows and water reflections.
 - **Distant terrain** out to 64 chunks, like Voxy: far hills, coasts and mountains from the saved world.
@@ -28,8 +28,7 @@
    | Mod | Version |
    |---|---|
    | [Fabric API](https://modrinth.com/mod/fabric-api) | 0.166.2+26.3 or newer |
-   | [Camera Obscura](https://modrinth.com/mod/camera-obscura) | 2.1.4+26.3 |
-   | [Polymer](https://modrinth.com/mod/polymer) | 0.18.x+26.3 (required by Camera Obscura) |
+   | [Polymer](https://modrinth.com/mod/polymer) | 0.18.x+26.3 |
 
    You need Minecraft 26.3, Fabric Loader 0.19.5 or newer, and Java 25.
 2. Start the server once. It creates `config/dailycams/config.json`.
@@ -52,15 +51,13 @@
 
 ## Good to know
 
-- **It depends on Camera Obscura internals.** Daily Cams uses parts of Camera Obscura that aren't a public API.
-  This release is built and tested against Camera Obscura **2.1.4+26.3**. If a later Camera Obscura version
-  breaks it, the server stops at startup with a mixin error that names `dailycams`; it won't fail silently.
-- **What the pictures look like is up to Camera Obscura's renderer:** vanilla models and textures, lighting,
-  fog, sky and clouds. Modded blocks appear only if Camera Obscura can read their models.
+- **Pictures show what the renderer can read:** vanilla models and textures, lighting, fog, sky and clouds.
+  Modded blocks appear only if their models are in Polymer's resource pack.
 - **Webhook URLs are secrets.** Commands only show a shortened form. Anyone who can read
   `config/dailycams/` can see the full URLs.
 
 ## License
 
-[MIT](LICENSE). Rendering is done by [Camera Obscura](https://github.com/tomalbrc/camera-obscura) by tomalbrc
-(LGPL-3.0), which is a separate download.
+Daily Cams' own code is [MIT](LICENSE). The renderer in `src/main/java/io/github/kunaigear/dailycams/obscura/` is a
+modified copy of [Camera Obscura](https://github.com/tomalbrc/camera-obscura) by tomalbrc, licensed under the
+[AGPL-3.0](LICENSE-AGPL), so the server mod's jar as a whole is under the AGPL-3.0. The client helper is MIT.

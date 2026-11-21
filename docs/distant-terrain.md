@@ -14,7 +14,7 @@ It works the way Voxy does, on the server:
 - **Real blocks from the saved world.** The server has already saved every chunk that was ever explored. Daily
   Cams reads the saved chunks in the camera's view directly from disk, without loading them into the world, and
   keeps their blocks around the surface, with the sky and block light saved for each block.
-- **Baked block models.** Each block's model, the same one Camera Obscura draws up close, is drawn from each of its
+- **Baked block models.** Each block's model, the same one the renderer draws up close, is drawn from each of its
   six sides into a small 16x16 picture. Distant blocks show those pictures: their real textures, overlays like the
   grass on a grass block's side, and their shapes, so leaves and plants are partly see-through. Grass, leaves and
   water get their biome colours. Further away, the pictures are averaged down so textures don't flicker.
@@ -24,7 +24,7 @@ It works the way Voxy does, on the server:
 - **Lit like the near terrain.** Distant blocks use their saved light (dark under trees and overhangs, lit around
   torches at night), the same corner shading as vanilla, and the same lighting as the blocks up close: with the
   [realistic shader](shader.md#realistic), sun shadows traced through the distant blocks, sky light, water with
-  reflections and haze; with the simple shader, Camera Obscura's own shading with the simple shader's shadows.
+  reflections and haze; with the simple shader, the renderer's own shading with the simple shader's shadows.
 - **Distance fog.** Distant terrain fades gently into the haze over its last half, so the end of the world isn't
   a hard line.
 

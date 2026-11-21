@@ -3,19 +3,10 @@
   "minVersion": "0.8",
   "package": "io.github.kunaigear.dailycams.mixin",
   "mixins": [
-    "ChunkMeshCacheMixin",
-    "ChunkMeshCacheInvoker",
-    "FastBlockGetterInvoker",
-    "FastBlockGetterMixin",
-    "ChunkMeshInvoker",
     "ChunkMapInvoker",
     "ChunkMapMixin",
-    "FabricPlatformMixin",
-    "PlayerRendererAccessor",
-    "RPHelperMixin",
-    "SoftwareRenderPipelineMixin",
-    "SoftwareRasterizerMixin",
-    "WorldRendererMixin"
+    "LivingEntityMixin",
+    "WardenMixin"
   ],
   "server": [
     "DedicatedServerMixin"

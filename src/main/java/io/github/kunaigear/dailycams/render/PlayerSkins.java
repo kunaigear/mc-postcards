@@ -1,12 +1,12 @@
 package io.github.kunaigear.dailycams.render;
 
 import io.github.kunaigear.dailycams.DailyCams;
-import io.github.kunaigear.dailycams.mixin.PlayerRendererAccessor;
 import com.mojang.authlib.minecraft.MinecraftProfileTexture;
-import de.tomalbrc.cameraobscura.json.CachedIdentifierDeserializer;
-import de.tomalbrc.cameraobscura.renderer.EntityRenderers;
-import de.tomalbrc.cameraobscura.sore.Texture;
-import de.tomalbrc.cameraobscura.util.resource.RPHelper;
+import io.github.kunaigear.dailycams.obscura.json.CachedIdentifierDeserializer;
+import io.github.kunaigear.dailycams.obscura.renderer.EntityRenderers;
+import io.github.kunaigear.dailycams.obscura.renderer.entity.specific.PlayerRenderer;
+import io.github.kunaigear.dailycams.obscura.sore.Texture;
+import io.github.kunaigear.dailycams.obscura.util.resource.RPHelper;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EntityTypes;
@@ -81,7 +81,7 @@ public final class PlayerSkins {
             // Camera Obscura caches the texture and the baked player model that holds it: without this, a
             // default skin from a failed lookup (or an old skin) would be used for good.
             RPHelper.removeCached(CachedIdentifierDeserializer.get("dyn.p:" + uuid));
-            var models = ((PlayerRendererAccessor) EntityRenderers.RENDERER.get(EntityTypes.PLAYER)).dailycams$cache();
+            var models = ((PlayerRenderer) EntityRenderers.RENDERER.get(EntityTypes.PLAYER)).PLAYER_CACHE;
             models.remove("dyn.p:" + uuid + "_wide");
             models.remove("dyn.p:" + uuid + "_slim");
         });

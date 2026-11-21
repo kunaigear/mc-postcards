@@ -12,7 +12,7 @@ busy. Renders take longer on a small server, but players shouldn't notice them.
 2. For each camera, the mod works out which chunks it can actually see (its view cone, up to `renderDistance`),
    plus a one-chunk margin. It loads them with temporary chunk tickets, nearest first and a few at a time. The
    tickets aren't saved and don't tick entities. Missing terrain is generated as it would be for a player.
-3. A background thread builds geometry for the visible chunk sections, draws the frame with Camera Obscura, applies
+3. A background thread builds geometry for the visible chunk sections, draws the frame, applies
    the [shader](shader.md) and encodes the image.
 4. The tickets are removed and the picture is uploaded. HTTP 429 and 5xx responses are retried, and Discord's
    `retry_after` is respected.

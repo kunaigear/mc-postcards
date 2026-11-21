@@ -1,10 +1,9 @@
 package io.github.kunaigear.dailycams.render;
 
 import io.github.kunaigear.dailycams.DailyCams;
-import io.github.kunaigear.dailycams.mixin.ChunkMeshCacheInvoker;
-import io.github.kunaigear.dailycams.mixin.ChunkMeshInvoker;
-import de.tomalbrc.cameraobscura.renderer.ChunkMeshCache;
-import de.tomalbrc.cameraobscura.renderer.WorldRenderer;
+import io.github.kunaigear.dailycams.obscura.renderer.ChunkMeshCache;
+import io.github.kunaigear.dailycams.obscura.renderer.WorldRenderer;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongSet;
@@ -25,7 +24,7 @@ import org.joml.Vector3d;
 import java.awt.image.BufferedImage;
 import java.util.List;
 
-/** Bridge to Camera Obscura's software renderer. Runs on the render thread, never on the server thread. */
+/** Drives the software renderer for one picture. Runs on the render thread, never on the server thread. */
 final class CameraRenderer {
     private CameraRenderer() {}
 
@@ -35,9 +34,9 @@ final class CameraRenderer {
     /** {@code renderDistance} is in blocks. {@code cpuShare} limits how much of one core the render may use. */
     record Settings(int width, int height, int fov, int renderDistance, int ssaa, double cpuShare,
                     String shader, DailyCamsConfig.ShaderSettings simple, DailyCamsConfig.RealisticSettings realistic,
-                    int lodDistance) {}
+                    int lodDistance, boolean renderEntities) {}
 
-    /** Chunk radius Camera Obscura looks at for a given view distance (mirrors WorldRenderer). */
+    /** Chunk radius the renderer looks at for a given view distance (mirrors WorldRenderer). */
     static int chunkRadius(int renderDistance) {
         return ChunkMeshCache.toChunkCoord(renderDistance + ChunkMeshCache.CHUNK_SIZE - 1);
     }
@@ -53,22 +52,23 @@ final class CameraRenderer {
         RenderFlags.rendering(true);
         stage = "building";
         try {
-            // Build fresh meshes for every section the renderer will look at. We never reuse Camera Obscura's
-            // cached ones: a mesh built while its chunk was unloaded would be empty and is never marked dirty.
-            // Sections that can't appear in the picture (outside the view cone, beyond the view distance or
-            // outside the build height) get an empty mesh instead. Building is by far the most expensive step.
+            // Build meshes for every section the renderer will look at. Sections that can't appear in the picture
+            // (outside the view cone, beyond the view distance or outside the build height) get an empty mesh.
             long meshStart = System.nanoTime();
             int built = 0, skipped = 0;
             boolean realistic = "realistic".equals(s.shader());
             RenderFlags.bushyLeaves(realistic);
             Long2ObjectOpenHashMap<ChunkMeshCache.ChunkMesh> meshes = new Long2ObjectOpenHashMap<>();
+            Renderer renderer = new Renderer(level, s, meshes);
+            renderer.updateCamera(x, y, z, pitch, yaw);
+            ChunkMeshCache.meshFor(renderer.viewProjection());
             Long2ReferenceOpenHashMap<ChunkAccess> chunks = LoadedChunks.of(level);
             for (int dx = -view.radius; dx <= view.radius; dx++) {
                 for (int dy = -view.radius; dy <= view.radius; dy++) {
                     for (int dz = -view.radius; dz <= view.radius; dz++) {
                         int sx = view.cx + dx, sy = view.cy + dy, sz = view.cz + dz;
                         long key = ChunkMeshCache.chunkKeyFromCoords(sx, sy, sz);
-                        ChunkMeshCache.ChunkMesh mesh = ChunkMeshInvoker.dailycams$create(ChunkMeshCache.chunkOriginFromKey(key), key);
+                        ChunkMeshCache.ChunkMesh mesh = new ChunkMeshCache.ChunkMesh(ChunkMeshCache.chunkOriginFromKey(key), key);
                         boolean visible = view.sectionVisible(sx, sy, sz);
                         if (visible && missingColumns.contains(ChunkPos.pack(sx, sz))) {
                             visible = false;
@@ -77,7 +77,7 @@ final class CameraRenderer {
                         if (visible && emptyMesh(level, chunks, sx, sy, sz)) visible = false;
                         if (visible) {
                             SectionCache.begin(mesh.origin());
-                            ChunkMeshCacheInvoker.dailycams$rebuildChunk(level, mesh);
+                            ChunkMeshCache.rebuildChunk(level, mesh);
                             SectionCache.end();
                             built++;
                             Throttle.checkpoint();
@@ -89,25 +89,21 @@ final class CameraRenderer {
                 }
             }
             RenderFlags.bushyLeaves(false);
+            ChunkMeshCache.meshFor(null);
             long meshMs = (System.nanoTime() - meshStart) / 1_000_000;
             if (skipped > 0) {
                 DailyCams.LOGGER.warn("Left out {} chunk sections from {} chunks that didn't load", skipped, missingColumns.size());
             }
 
-            PinnedMeshes.pin(level, meshes);
-            try {
+            {
                 stage = "drawing";
                 long drawStart = System.nanoTime();
-                Renderer renderer = new Renderer(level, s);
-                renderer.updateCamera(x, y, z, pitch, yaw);
                 // Someone standing where the camera is (typically its owner right after placing it) would
                 // otherwise fill the picture with the inside of their own head.
                 renderer.entity = hidden;
-                // Every mesh is pinned and clean, so this only reads the sky/fog/sun values for the frame.
-                renderer.updateChunksInRange(level, false);
                 // The realistic shader relights the frame, so it records what each pixel shows while drawing.
                 GBuffer gbuffer = realistic ? new GBuffer(s.width(), s.height(), s.ssaa(), s.width() * s.ssaa()) : null;
-                // With distant terrain, Camera Obscura's fog would end the near terrain in a wall of fog.
+                // With distant terrain, the renderer's fog would end the near terrain in a wall of fog.
                 // Not where the world has a roof (the Nether): the saved height maps would show only the roof.
                 boolean lodOn = s.lodDistance() > s.renderDistance() && !level.dimensionType().hasCeiling();
                 // Without the realistic shader, distant terrain needs to know where it shows through glass and water.
@@ -151,11 +147,10 @@ final class CameraRenderer {
                 DailyCams.LOGGER.info("Built {} chunk sections in {} ms, drew the frame in {} ms, shader {} ms ({} ms in total spent yielding to the server)",
                         built, meshMs, drawMs, shadeMs, Throttle.sleptMs());
                 return image;
-            } finally {
-                PinnedMeshes.clear();
             }
         } finally {
             RenderFlags.bushyLeaves(false);
+            ChunkMeshCache.meshFor(null);
             RenderFlags.rendering(false);
             BlockModelViews.clear();
             Throttle.end();
@@ -163,7 +158,7 @@ final class CameraRenderer {
     }
 
     /**
-     * Whether Camera Obscura would build an empty mesh for a section, found without looking at each of its 4096 blocks
+     * Whether the renderer would build an empty mesh for a section, found without looking at each of its 4096 blocks
      * and their neighbours: it holds only air (an unloaded chunk reads as air too), or it's solid all through and so
      * are the blocks touching it, so every block is hidden.
      */
@@ -188,7 +183,7 @@ final class CameraRenderer {
         return true;
     }
 
-    /** A loaded section, or null outside the world or in an unloaded chunk (where Camera Obscura sees air). */
+    /** A loaded section, or null outside the world or in an unloaded chunk (where the renderer sees air). */
     private static @Nullable LevelChunkSection section(Level level, Long2ReferenceOpenHashMap<ChunkAccess> chunks, int sx, int sy, int sz) {
         ChunkAccess chunk = chunks.get(ChunkPos.pack(sx, sz));
         if (chunk == null || sy < level.getMinSectionY() || sy > level.getMaxSectionY()) return null;
@@ -219,19 +214,9 @@ final class CameraRenderer {
         return best;
     }
 
-    /** WorldRenderer with a per-camera field of view instead of Camera Obscura's global one. */
     private static final class Renderer extends WorldRenderer {
-        /**
-         * Camera Obscura moves the camera to {@link #entity}'s eyes before drawing. We only use that field to
-         * hide an entity standing at the camera, so keep our own position and rotation.
-         */
-        @Override
-        public void updateCamera(Entity entity) {
-        }
-
-        Renderer(ServerLevel level, Settings s) {
-            super(level, s.width(), s.height(), s.renderDistance(), s.ssaa());
-            camera.setPerspective(Math.toRadians(s.fov()), (double) s.width() / s.height(), 0.1f, s.renderDistance());
+        Renderer(ServerLevel level, Settings s, Long2ObjectMap<ChunkMeshCache.ChunkMesh> meshes) {
+            super(level, s.width(), s.height(), s.fov(), s.renderDistance(), s.ssaa(), s.renderEntities(), meshes);
         }
 
         /** What the post-processing shader needs from the frame that was just drawn. */

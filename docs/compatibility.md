@@ -14,7 +14,7 @@ These ran together on a production Fabric 26.3 server (Loader 0.20.1), with a pl
 | Lithium 0.26.3, FerriteCore 9.0.0, Krypton 0.3.2, spark 1.10.187 | server | No conflicts. |
 | C2ME 0.4.2-alpha | server | Works. Renders get faster because chunks load and generate faster. |
 | ScalableLux 0.3.0-alpha | server | Works. Lighting and shader shadows are correct with its light engine. |
-| Jade 26.3.5, JEI 31.17 | server + client | Works. Players with Jade or JEI stay connected while holding Camera Obscura's camera item, a Polymer item. |
+| Jade 26.3.5, JEI 31.17 | server + client | Works. Players with Jade or JEI stay connected while holding Polymer items. |
 | Voxy 0.2.20-beta + Sodium | client | Works. Voxy is a client mod and isn't needed on the server. |
 
 ModernFix had no 26.3 build at the time of testing.
@@ -35,8 +35,7 @@ which places cameras at the freecam view. See the [client helper](usage.md#clien
 
 ## Other mods
 
-- **Modded blocks** appear in pictures only if Camera Obscura can read their models.
-- **Camera Obscura** 2.1.4+26.3 is the tested version. Daily Cams uses parts of it that aren't a public API, so
-  later versions may not work. An incompatible version stops the server at startup with a mixin error.
+- **Modded blocks** appear in pictures only if their models are in Polymer's resource pack.
+- **Camera Obscura** isn't needed: Daily Cams has its own copy of its renderer. Both can be installed together.
 - **Permission mods** such as LuckPerms work through Fabric API's permission API. See the
   [permission nodes](usage.md#permission-tiers).

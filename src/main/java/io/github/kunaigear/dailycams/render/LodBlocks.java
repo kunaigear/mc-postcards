@@ -1,10 +1,10 @@
 package io.github.kunaigear.dailycams.render;
 
-import io.github.kunaigear.dailycams.mixin.ChunkMeshCacheInvoker;
-import de.tomalbrc.cameraobscura.model.resource.RPModel;
-import de.tomalbrc.cameraobscura.model.triangle.ModelTesselator;
-import de.tomalbrc.cameraobscura.sore.Texture;
-import de.tomalbrc.cameraobscura.sore.model.Mesh;
+import io.github.kunaigear.dailycams.obscura.model.resource.RPModel;
+import io.github.kunaigear.dailycams.obscura.model.triangle.ModelTesselator;
+import io.github.kunaigear.dailycams.obscura.renderer.ChunkMeshCache;
+import io.github.kunaigear.dailycams.obscura.sore.Texture;
+import io.github.kunaigear.dailycams.obscura.sore.model.Mesh;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.biome.Biome;
@@ -124,7 +124,7 @@ final class LodBlocks {
 
         List<RPModel.View> views;
         try {
-            views = ChunkMeshCacheInvoker.dailycams$getModelViewForState(getter, 0, 64, 0, state);
+            views = ChunkMeshCache.getModelViewForState(getter, 0, 64, 0, state);
         } catch (Exception e) {
             views = null;
         }

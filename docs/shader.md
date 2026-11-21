@@ -2,14 +2,14 @@
 
 [← Back to the README](../README.md)
 
-Daily Cams has two built-in "shader packs". They run on the server after Camera Obscura has drawn the picture, so
+Daily Cams has two built-in "shader packs". They run on the server after the renderer has drawn the picture, so
 players don't need anything for them. They're unrelated to Iris shader packs on players' clients.
 
 | `"shader"` | Look | Extra time per camera (1080p, 2-core host) |
 |---|---|---|
-| `simple` (default) | Camera Obscura's picture with sun shadows, warm light, haze, bloom and a colour grade. | about 1–2 s |
+| `simple` (default) | The renderer's picture with sun shadows, warm light, haze, bloom and a colour grade. | about 1–2 s |
 | `realistic` | Relit from scratch, in the style of shader packs like Photon: physical sky, volumetric clouds, soft shadows, sun rays, leaves that glow in the sun, reflections in water, filmic colour. | about 13–20 s |
-| `none` | Camera Obscura's plain picture. | – |
+| `none` | The renderer's plain picture. | – |
 
 Choose one for every camera with `"shader"` in the config, or for one camera with
 `/dailycam shader <simple|realistic|none> [name]`. `default` makes a camera follow the config again.
@@ -22,7 +22,7 @@ Choose one for every camera with `"shader"` in the config, or for one camera wit
 
 ![The same view with the simple shader (left) and the realistic shader (right)](images/realistic-comparison.jpg)
 
-Instead of adjusting Camera Obscura's picture, the realistic shader records what each pixel shows (the block's
+Instead of adjusting the renderer's picture, the realistic shader records what each pixel shows (the block's
 colour without lighting, its direction, and the sky and block light there) while the picture is drawn. It then
 lights the scene again from scratch:
 
@@ -92,7 +92,7 @@ In the [2-core benchmark](performance.md#shaders), with the default CPU limit, a
 20–21.5 s. The shading itself took 19–22 s. TPS stayed at 19–20 in the worst second. It needs about 170 MB of extra
 memory at 1080p, and about 4× that at 4K.
 
-The realistic shader replaces Camera Obscura's sky, clouds and fog with its own.
+The realistic shader replaces the renderer's sky, clouds and fog with its own.
 
 ## Simple
 
