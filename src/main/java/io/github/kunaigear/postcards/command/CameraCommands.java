@@ -16,7 +16,6 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
-import com.mojang.brigadier.tree.LiteralCommandNode;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
@@ -75,9 +74,7 @@ import java.util.function.BiFunction;
  */
 public final class CameraCommands {
     /** Personal camera, listing, info. Everyone. */
-    /** The command, and the names it had before the mod was called Postcards. */
     public static final String COMMAND = "postcard";
-    public static final List<String> OLD_NAMES = List.of("dailycam", "dcam");
     /** Field of view range, the same as Minecraft's own FOV slider. */
     private static final int MIN_FOV = 30, MAX_FOV = 110;
 
@@ -107,7 +104,7 @@ public final class CameraCommands {
     // ================================================================== registration
 
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
-        LiteralCommandNode<CommandSourceStack> root = dispatcher.register(Commands.literal(COMMAND)
+        dispatcher.register(Commands.literal(COMMAND)
                 .requires(PermissionPredicates.<CommandSourceStack>require(PERM_USE, PermissionLevel.ALL))
                 .executes(CameraCommands::help)
                 .then(Commands.literal("set")
@@ -154,14 +151,6 @@ public final class CameraCommands {
                 .then(Commands.literal("reload")
                         .requires(PermissionPredicates.<CommandSourceStack>require(PERM_ADMIN, LEVEL_ADMIN))
                         .executes(CameraCommands::reload)));
-
-        // A redirect only forwards arguments, so the bare alias needs its own executes.
-        for (String name : OLD_NAMES) {
-            dispatcher.register(Commands.literal(name)
-                    .requires(PermissionPredicates.<CommandSourceStack>require(PERM_USE, PermissionLevel.ALL))
-                    .executes(CameraCommands::help)
-                    .redirect(root));
-        }
     }
 
     private static RequiredArgumentBuilder<CommandSourceStack, String> nameArg(SuggestionProvider<CommandSourceStack> suggestions) {
@@ -509,7 +498,6 @@ public final class CameraCommands {
         if (isAdmin(src)) {
             out.append(Component.literal("\n  /postcard webhook <name> <url|default> | runall | reload").withStyle(ChatFormatting.RED));
         }
-        out.append(Component.literal("\nThe old names /dailycam and /dcam still work.").withStyle(ChatFormatting.GRAY));
         // The renderer is a modified copy of Camera Obscura, under the AGPL, which asks to offer the source to players.
         out.append(Component.literal("\nSource code (AGPL-3.0): " + SOURCE_URL).withStyle(s -> s.withColor(ChatFormatting.GRAY)
                 .withClickEvent(new ClickEvent.OpenUrl(URI.create(SOURCE_URL)))));

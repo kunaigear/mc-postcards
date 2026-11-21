@@ -195,7 +195,7 @@ Under `src/main/java/io/github/kunaigear/postcards/`:
 
 | Path | Contents |
 |---|---|
-| `command/` | The `/postcard` command and its old names `/dailycam` and `/dcam`. |
+| `command/` | The `/postcard` command. |
 | `camera/` | The camera model and `cameras.json`. |
 | `render/` | The render queue, chunk loading, the throttle, the shaders and distant terrain. |
 | `obscura/` | The software renderer: a modified copy of [Camera Obscura](https://github.com/tomalbrc/camera-obscura) 2.1.4+26.3, under the AGPL-3.0 (see below). |
