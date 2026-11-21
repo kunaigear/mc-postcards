@@ -1,3 +1,8 @@
+/*
+ * Derived from Camera Obscura 2.1.4+26.3 by tomalbrc (https://github.com/tomalbrc/camera-obscura).
+ * Copyright (c) 2026 tomalbrc. Modified for Daily Cams by kunaigear, November 2026.
+ * Licensed under the GNU Affero General Public License, version 3: see LICENSE-AGPL in the repository root.
+ */
 package io.github.kunaigear.dailycams.obscura.util;
 
 import net.minecraft.core.Direction;
@@ -6,11 +11,7 @@ import org.joml.Matrix4d;
 import org.joml.Matrix4dc;
 import org.joml.Vector3fc;
 
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-
 public class Constants {
-    public static final String MOD_ID = "camera-obscura";
     public static final String DYNAMIC_PLAYER_TEXTURE = "dyn.p"; // player models and player heads
     public static final String DYNAMIC_SIGN_TEXTURE = "dyn.s";
     public static final String DYNAMIC_MAP_TEXTURE = "dyn.m";
@@ -18,9 +19,6 @@ public class Constants {
     public static final Vector3fc ZERO_VEC3 = Vec3.ZERO.toVector3f();
     public static final Vector3fc UNIT_VEC3 = new Vec3(1, 1, 1).toVector3f();
     public static final Matrix4dc ZERO_MATRIX = new Matrix4d();
-
-    public static ExecutorService RENDER_EXEC = Executors.newSingleThreadExecutor();
-    public static ExecutorService CHUNK_EXEC = Executors.newVirtualThreadPerTaskExecutor();
 
     public static final Direction[][] FACE_TANGENTS = new Direction[6][2];
 
@@ -47,8 +45,4 @@ public class Constants {
         }
     }
 
-    public static void stop() {
-        RENDER_EXEC.shutdownNow();
-        CHUNK_EXEC.shutdownNow();
-    }
 }

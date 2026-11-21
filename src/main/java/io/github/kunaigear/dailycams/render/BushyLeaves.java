@@ -1,11 +1,11 @@
 package io.github.kunaigear.dailycams.render;
 
-import io.github.kunaigear.dailycams.mixin.ChunkMeshCacheInvoker;
-import de.tomalbrc.cameraobscura.model.resource.RPElement;
-import de.tomalbrc.cameraobscura.model.resource.RPModel;
-import de.tomalbrc.cameraobscura.model.triangle.ModelTesselator;
-import de.tomalbrc.cameraobscura.sore.model.Mesh;
-import de.tomalbrc.cameraobscura.sore.model.Model;
+import io.github.kunaigear.dailycams.obscura.model.resource.RPElement;
+import io.github.kunaigear.dailycams.obscura.model.resource.RPModel;
+import io.github.kunaigear.dailycams.obscura.model.triangle.ModelTesselator;
+import io.github.kunaigear.dailycams.obscura.renderer.ChunkMeshCache;
+import io.github.kunaigear.dailycams.obscura.sore.model.Mesh;
+import io.github.kunaigear.dailycams.obscura.sore.model.Model;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.Identifier;
@@ -13,6 +13,7 @@ import net.minecraft.world.level.BlockAndLightGetter;
 import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.Nullable;
+import org.joml.Matrix4dc;
 import org.joml.Vector3f;
 import org.joml.Vector4f;
 
@@ -40,15 +41,17 @@ public final class BushyLeaves {
     private BushyLeaves() {}
 
     /** Camera Obscura's models for a leaf block plus the leaves sticking out, or null to build it as usual. */
-    public static @Nullable List<Model> models(BlockAndLightGetter level, int x, int y, int z, BlockState state) {
+    public static @Nullable List<Model> models(BlockAndLightGetter level, int x, int y, int z, BlockState state, Matrix4dc transform) {
         if (!RenderFlags.bushyLeaves() || !(state.getBlock() instanceof LeavesBlock) || !exposed(level, x, y, z)) return null;
-        List<RPModel.View> views = ChunkMeshCacheInvoker.dailycams$getModelViewForState(level, x, y, z, state);
+        List<RPModel.View> views = ChunkMeshCache.getModelViewForState(level, x, y, z, state);
         if (views == null || views.isEmpty()) return null;
-        EnumSet<Direction> culled = ChunkMeshCacheInvoker.dailycams$computeCulledFaces(level, x, y, z, state);
+        EnumSet<Direction> culled = ChunkMeshCache.computeCulledFaces(level, x, y, z, state);
         int variant = Math.min(VARIANTS - 1, (int) (RealisticShader.Noise.hash(x, y, z) * VARIANTS));
         List<Mesh> meshes = CACHE.computeIfAbsent(new Key(state, EnumSet.copyOf(culled), variant), k -> build(views, k));
         List<Model> models = new ArrayList<>(meshes.size());
-        for (Mesh mesh : meshes) models.add(ChunkMeshCacheInvoker.dailycams$buildModelWithLighting(level, x, y, z, mesh, state));
+        for (Mesh mesh : meshes) {
+            if (ChunkMeshCache.onScreen(mesh, transform)) models.add(ChunkMeshCache.buildModelWithLighting(level, x, y, z, mesh, state));
+        }
         return models;
     }
 

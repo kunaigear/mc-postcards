@@ -1,11 +1,19 @@
+/*
+ * Derived from Camera Obscura 2.1.4+26.3 by tomalbrc (https://github.com/tomalbrc/camera-obscura).
+ * Copyright (c) 2026 tomalbrc. Modified for Daily Cams by kunaigear, November 2026.
+ * Licensed under the GNU Affero General Public License, version 3: see LICENSE-AGPL in the repository root.
+ */
 package io.github.kunaigear.dailycams.obscura.renderer;
 
-import io.github.kunaigear.dailycams.obscura.ModConfig;
 import io.github.kunaigear.dailycams.obscura.color.BlockColors;
+import io.github.kunaigear.dailycams.render.BlockModelViews;
+import io.github.kunaigear.dailycams.render.BushyLeaves;
+import io.github.kunaigear.dailycams.render.CommandCulling;
+import io.github.kunaigear.dailycams.render.SectionCache;
 import io.github.kunaigear.dailycams.obscura.model.resource.RPModel;
 import io.github.kunaigear.dailycams.obscura.model.triangle.FluidMeshBuilder;
 import io.github.kunaigear.dailycams.obscura.model.triangle.ModelTesselator;
-import io.github.kunaigear.dailycams.obscura.platform.Platforms;
+import io.github.kunaigear.dailycams.obscura.platform.Platform;
 import io.github.kunaigear.dailycams.obscura.sore.model.Mesh;
 import io.github.kunaigear.dailycams.obscura.sore.model.Model;
 import io.github.kunaigear.dailycams.obscura.sore.pipeline.DrawCommand;
@@ -15,7 +23,6 @@ import io.github.kunaigear.dailycams.obscura.util.Constants;
 import io.github.kunaigear.dailycams.obscura.util.resource.RPHelper;
 import it.unimi.dsi.fastutil.ints.IntList;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
-import it.unimi.dsi.fastutil.longs.Long2ObjectMaps;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
@@ -32,39 +39,45 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.ChunkAccess;
-import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 import net.minecraft.world.level.material.FluidState;
-import net.minecraft.world.level.material.Fluids;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4d;
+import org.joml.Matrix4dc;
 import org.jspecify.annotations.NonNull;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 public class ChunkMeshCache {
     public static final int CHUNK_SIZE = 16;
+    private static final int BIOME_BLEND = 1;
+    /** For models without tint indices, which never read their draw command's tints. */
+    private static final IntList NO_TINTS = IntList.of();
     private static final int CHUNK_SHIFT = 4;
     private static final int BITS = 21;
     private static final long MASK = (1L << BITS) - 1;
-
-    public static final Map<Level, Long2ObjectMap<ChunkMesh>> CHUNK_CACHE = new ConcurrentHashMap<>();
 
     private static final Object BLOCK_MESH_CACHE_LOCK = new Object();
     private static volatile Long2ObjectMap<List<Mesh>> BLOCK_MESH_CACHE = new Long2ObjectOpenHashMap<>();
 
     private static final ConcurrentHashMap<Level, AtomicReference<Long2ReferenceOpenHashMap<ChunkAccess>>> VANILLA_CHUNKS = new ConcurrentHashMap<>();
 
+    /** The frame's view-projection while meshing for it, or null to mesh everything. Render thread only. */
+    private static @Nullable Matrix4dc frameViewProjection;
+
     public static class FastBlockGetter implements BlockAndLightGetter {
         private final LevelLightEngine lightEngine;
         private final int minY;
         private final int height;
         private final Long2ReferenceOpenHashMap<ChunkAccess> chunkCache;
+        // Nearly every lookup asks for the chunk asked for last. No chunk has this position: it's outside the border.
+        private long lastKey = ChunkPos.pack(Integer.MAX_VALUE, Integer.MAX_VALUE);
+        private @Nullable ChunkAccess lastChunk;
 
         public FastBlockGetter(Level level) {
             this.lightEngine = level.getLightEngine();
@@ -89,16 +102,26 @@ public class ChunkMeshCache {
 
         @Override
         public @NonNull BlockState getBlockState(@NonNull BlockPos pos) {
+            int i = SectionCache.index(pos);
+            if (i >= 0) {
+                BlockState known = SectionCache.state(i);
+                if (known != null) return known;
+            }
             ChunkAccess chunk = getChunkAt(pos);
-            if (chunk == null) return Blocks.AIR.defaultBlockState();
-            return chunk.getBlockState(pos);
+            BlockState state = chunk == null ? Blocks.AIR.defaultBlockState() : chunk.getBlockState(pos);
+            if (i >= 0) SectionCache.remember(i, state);
+            return state;
+        }
+
+        /** A chunk's fluid is the fluid of its block. */
+        @Override
+        public @NonNull FluidState getFluidState(@NonNull BlockPos pos) {
+            return getBlockState(pos).getFluidState();
         }
 
         @Override
-        public @NonNull FluidState getFluidState(@NonNull BlockPos pos) {
-            ChunkAccess chunk = getChunkAt(pos);
-            if (chunk == null) return Fluids.EMPTY.defaultFluidState();
-            return chunk.getFluidState(pos);
+        public int getBrightness(@NonNull LightLayer layer, @NonNull BlockPos pos) {
+            return SectionCache.light(lightEngine, layer, pos);
         }
 
         @Override
@@ -111,11 +134,13 @@ public class ChunkMeshCache {
             return minY;
         }
 
-        private @Nullable ChunkAccess getChunkAt(BlockPos pos) {
-            int cx = pos.getX() >> 4;
-            int cz = pos.getZ() >> 4;
-            long packed = ((long) cx & 0xFFFFFFFFL) | (((long) cz & 0xFFFFFFFFL) << 32);
-            return chunkCache.get(packed);
+        public @Nullable ChunkAccess getChunkAt(BlockPos pos) {
+            long key = ChunkPos.pack(pos.getX() >> 4, pos.getZ() >> 4);
+            if (key != lastKey) {
+                lastChunk = chunkCache.get(key);
+                lastKey = key;
+            }
+            return lastChunk;
         }
     }
 
@@ -144,51 +169,10 @@ public class ChunkMeshCache {
         }
     }
 
-    @Nullable
-    public static ChunkMeshCache.ChunkMesh getChunkMesh(Level level, BlockPos pos) {
-        long key = chunkKeyFromBlock(pos);
-        return getChunkMesh(level, key);
-    }
-
-    @Nullable
-    public static ChunkMeshCache.ChunkMesh getChunkMesh(Level level, long key) {
-        Long2ObjectMap<ChunkMesh> inner = CHUNK_CACHE.get(level);
-        if (inner == null) return null;
-        return inner.get(key);
-    }
-
-    @Nullable
-    public static ChunkMeshCache.ChunkMesh putChunkMesh(Level level, long key, ChunkMesh chunkMesh) {
-        return innerMap(level).put(key, chunkMesh);
-    }
-
-    private static Long2ObjectMap<ChunkMesh> innerMap(Level level) {
-        return CHUNK_CACHE.computeIfAbsent(level, _ -> Long2ObjectMaps.synchronize(new Long2ObjectOpenHashMap<>()));
-    }
-
-    public static void onBlockChanged(Level level, BlockPos pos) {
-        long key = chunkKeyFromBlock(pos);
-        ChunkMesh chunkMesh = getChunkMesh(level, key);
-        if (chunkMesh != null) {
-            chunkMesh.markDirty();
-        }
-
-        for (Direction dir : Direction.values()) {
-            BlockPos neighborPos = pos.relative(dir);
-            long neighborKey = ChunkMeshCache.chunkKeyFromBlock(neighborPos);
-            if (neighborKey != key) {
-                ChunkMesh neighbor = getChunkMesh(level, neighborKey);
-                if (neighbor != null && neighbor != chunkMesh) {
-                    neighbor.markDirty();
-                }
-            }
-        }
-    }
-
-    public static void onUnloadChunk(LevelChunk chunk, int x, int z) {
-    }
-
-    public static void onLoadChunk(LevelChunk chunk, int x, int z) {
+    /** The loaded chunks by {@link ChunkPos#pack}, a copy that any thread may read. Don't modify. */
+    public static Long2ReferenceOpenHashMap<ChunkAccess> loadedChunks(Level level) {
+        var ref = VANILLA_CHUNKS.get(level);
+        return ref != null ? ref.get() : new Long2ReferenceOpenHashMap<>();
     }
 
     private static long chunkKeyFromBlock(BlockPos pos) {
@@ -222,10 +206,10 @@ public class ChunkMeshCache {
     }
 
     static boolean isOccluded(BlockGetter level, int wx, int wy, int wz) {
-        BlockState state = level.getBlockState(new BlockPos(wx, wy, wz));
+        BlockState state = level.getBlockState(SectionCache.position(wx, wy, wz));
         if (!state.isSolidRender()) return false;
-        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        for (Direction dir : Direction.values()) {
+        BlockPos.MutableBlockPos pos = SectionCache.cursor();
+        for (Direction dir : SectionCache.DIRECTIONS) {
             pos.set(wx + dir.getStepX(), wy + dir.getStepY(), wz + dir.getStepZ());
             BlockState neighbor = level.getBlockState(pos);
             if (!neighbor.isSolidRender()) return false;
@@ -233,44 +217,60 @@ public class ChunkMeshCache {
         return true;
     }
 
-    static Model buildModelWithLighting(BlockAndLightGetter level, int wx, int wy, int wz, Mesh mesh, BlockState state) {
+    public static Model buildModelWithLighting(BlockAndLightGetter level, int wx, int wy, int wz, Mesh mesh, BlockState state) {
         int vertexCount = mesh.positions.length / 3;
         double[] ao = new double[vertexCount];
         double[] skyLight = new double[vertexCount];
         double[] blockLight = new double[vertexCount];
 
         boolean solidRender = state.isSolidRender();
+        // A block that isn't solid takes its light from its own position, the same for every vertex.
+        double flatSky = 0, flatBlock = 0;
+        if (!solidRender) {
+            BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos().set(wx, wy, wz);
+            flatSky = level.getBrightness(LightLayer.SKY, pos) / 15.0f;
+            flatBlock = level.getBrightness(LightLayer.BLOCK, pos) / 15.0f;
+        }
 
-        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        float[] positions = mesh.positions, normals = mesh.normals;
         for (int i = 0; i < vertexCount; i++) {
-            double x = mesh.positions[i * 3];
-            double y = mesh.positions[i * 3 + 1];
-            double z = mesh.positions[i * 3 + 2];
-            double nx = mesh.normals[i * 3];
-            double ny = mesh.normals[i * 3 + 1];
-            double nz = mesh.normals[i * 3 + 2];
-
-            Direction faceDir = Direction.getApproximateNearest(nx, ny, nz);
-            Direction[] sides = getAOSideDirections(faceDir, x, y, z);
-            ao[i] = mesh.ao ? computeVertexAO(level, wx, wy, wz, faceDir, sides[0], sides[1]) : 1.f;
-
-            double worldX = wx + x;
-            double worldY = wy + y;
-            double worldZ = wz + z;
-
-            int sky;
-            int block;
-            if (solidRender) {
-                sky = getSmoothLight(level, worldX, worldY, worldZ, LightLayer.SKY, faceDir);
-                block = getSmoothLight(level, worldX, worldY, worldZ, LightLayer.BLOCK, faceDir);
-            } else {
-                pos.set(wx, wy, wz);
-                sky = level.getBrightness(LightLayer.SKY, pos);
-                block = level.getBrightness(LightLayer.BLOCK, pos);
+            // Triangles of a face repeat its corners: a vertex like one just before it gets the same values.
+            int same = -1;
+            for (int j = i - 1; j >= Math.max(0, i - 5); j--) {
+                if (positions[j * 3] == positions[i * 3] && positions[j * 3 + 1] == positions[i * 3 + 1] && positions[j * 3 + 2] == positions[i * 3 + 2]
+                        && normals[j * 3] == normals[i * 3] && normals[j * 3 + 1] == normals[i * 3 + 1] && normals[j * 3 + 2] == normals[i * 3 + 2]) {
+                    same = j;
+                    break;
+                }
+            }
+            if (same >= 0) {
+                ao[i] = ao[same];
+                skyLight[i] = skyLight[same];
+                blockLight[i] = blockLight[same];
+                continue;
             }
 
-            skyLight[i] = sky / 15.0f;
-            blockLight[i] = block / 15.0f;
+            double x = positions[i * 3];
+            double y = positions[i * 3 + 1];
+            double z = positions[i * 3 + 2];
+            double nx = normals[i * 3];
+            double ny = normals[i * 3 + 1];
+            double nz = normals[i * 3 + 2];
+
+            Direction faceDir = Direction.getApproximateNearest(nx, ny, nz);
+            Direction[] sides = SectionCache.cornerSides(faceDir, x, y, z);
+            ao[i] = mesh.ao ? computeVertexAO(level, wx, wy, wz, faceDir, sides[0], sides[1]) : 1.f;
+
+            if (solidRender) {
+                double worldX = wx + x;
+                double worldY = wy + y;
+                double worldZ = wz + z;
+                skyLight[i] = getSmoothLight(level, worldX, worldY, worldZ, LightLayer.SKY, faceDir) / 15.0f;
+                blockLight[i] = getSmoothLight(level, worldX, worldY, worldZ, LightLayer.BLOCK, faceDir) / 15.0f;
+            } else {
+                skyLight[i] = flatSky;
+                blockLight[i] = flatBlock;
+            }
         }
 
         return new Model(mesh, skyLight, blockLight, ao);
@@ -286,24 +286,10 @@ public class ChunkMeshCache {
         Direction t1 = tangents[0];
         Direction t2 = tangents[1];
 
-        return (level.getBrightness(layer, new BlockPos(fx, fy, fz)) +
-                level.getBrightness(layer, new BlockPos(fx - t1.getStepX(), fy - t1.getStepY(), fz - t1.getStepZ())) +
-                level.getBrightness(layer, new BlockPos(fx - t2.getStepX(), fy - t2.getStepY(), fz - t2.getStepZ())) +
-                level.getBrightness(layer, new BlockPos(fx - t1.getStepX() - t2.getStepX(), fy - t1.getStepY() - t2.getStepY(), fz - t1.getStepZ() - t2.getStepZ()))) / 4;
-    }
-
-    private static Direction[] getAOSideDirections(Direction faceDir, double x, double y, double z) {
-        boolean hX = x >= 0.5f;
-        boolean hY = y >= 0.5f;
-        boolean hZ = z >= 0.5f;
-        return switch (faceDir) {
-            case UP, DOWN ->
-                    new Direction[]{hX ? Direction.EAST : Direction.WEST, hZ ? Direction.SOUTH : Direction.NORTH};
-            case NORTH, SOUTH ->
-                    new Direction[]{hX ? Direction.EAST : Direction.WEST, hY ? Direction.UP : Direction.DOWN};
-            case EAST, WEST ->
-                    new Direction[]{hZ ? Direction.SOUTH : Direction.NORTH, hY ? Direction.UP : Direction.DOWN};
-        };
+        return (level.getBrightness(layer, SectionCache.position(fx, fy, fz)) +
+                level.getBrightness(layer, SectionCache.position(fx - t1.getStepX(), fy - t1.getStepY(), fz - t1.getStepZ())) +
+                level.getBrightness(layer, SectionCache.position(fx - t2.getStepX(), fy - t2.getStepY(), fz - t2.getStepZ())) +
+                level.getBrightness(layer, SectionCache.position(fx - t1.getStepX() - t2.getStepX(), fy - t1.getStepY() - t2.getStepY(), fz - t1.getStepZ() - t2.getStepZ()))) / 4;
     }
 
     private static double computeVertexAO(BlockGetter level, int wx, int wy, int wz, Direction faceDir, Direction side1, Direction side2) {
@@ -320,10 +306,12 @@ public class ChunkMeshCache {
     }
 
     private static boolean isSolidForAO(BlockGetter level, int x, int y, int z) {
-        return level.getBlockState(new BlockPos(x, y, z)).isSolidRender();
+        return level.getBlockState(SectionCache.position(x, y, z)).isSolidRender();
     }
 
-    static List<Model> getModelForState(BlockAndLightGetter level, int wx, int wy, int wz, BlockState state) {
+    static List<Model> getModelForState(BlockAndLightGetter level, int wx, int wy, int wz, BlockState state, Matrix4dc transform) {
+        List<Model> bushy = BushyLeaves.models(level, wx, wy, wz, state, transform);
+        if (bushy != null) return bushy;
         List<RPModel.View> views = getModelViewForState(level, wx, wy, wz, state);
         if (views == null || views.isEmpty()) return null;
 
@@ -341,7 +329,7 @@ public class ChunkMeshCache {
 
         List<Model> result = new ObjectArrayList<>(meshes.size());
         for (Mesh mesh : meshes) {
-            result.add(buildModelWithLighting(level, wx, wy, wz, mesh, state));
+            if (onScreen(mesh, transform)) result.add(buildModelWithLighting(level, wx, wy, wz, mesh, state));
         }
         return result;
     }
@@ -363,22 +351,22 @@ public class ChunkMeshCache {
         }
     }
 
-    static List<Model> getFluidModel(FastBlockGetter level, int wx, int wy, int wz, FluidState fluidState) {
+    static List<Model> getFluidModel(FastBlockGetter level, int wx, int wy, int wz, FluidState fluidState, Matrix4dc transform) {
         BlockState blockState = level.getBlockState(new BlockPos(wx, wy, wz));
         BlockPos pos = new BlockPos(wx, wy, wz);
 
         var mesh = FluidMeshBuilder.createFluidMesh(level, pos, fluidState);
-        if (mesh == null) return List.of();
+        if (mesh == null || !onScreen(mesh, transform)) return List.of();
 
         Model model = buildModelWithLighting(level, wx, wy, wz, mesh, blockState);
         return List.of(model);
     }
 
-    private static EnumSet<Direction> computeCulledFaces(BlockGetter level, int wx, int wy, int wz, BlockState state) {
+    public static EnumSet<Direction> computeCulledFaces(BlockGetter level, int wx, int wy, int wz, BlockState state) {
         EnumSet<Direction> culled = EnumSet.noneOf(Direction.class);
         if (state.isSolidRender()) {
-            BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-            for (Direction dir : Direction.values()) {
+            BlockPos.MutableBlockPos pos = SectionCache.cursor();
+            for (Direction dir : SectionCache.DIRECTIONS) {
                 pos.set(wx + dir.getStepX(), wy + dir.getStepY(), wz + dir.getStepZ());
                 BlockState neighbor = level.getBlockState(pos);
                 if (neighbor.isSolidRender() && !neighbor.isAir()) {
@@ -389,13 +377,13 @@ public class ChunkMeshCache {
         return culled;
     }
 
-    private static List<RPModel.View> getModelViewForState(BlockGetter level, int wx, int wy, int wz, BlockState state) {
-        BlockPos pos = new BlockPos(wx, wy, wz);
+    public static List<RPModel.View> getModelViewForState(BlockGetter level, int wx, int wy, int wz, BlockState state) {
+        BlockPos pos = SectionCache.position(wx, wy, wz);
         RPModel.View model = getSpecialModel(level, wx, wy, wz, pos, state);
         if (model != null)
             return List.of(model);
 
-        return RPHelper.loadBlockModelViews(state);
+        return BlockModelViews.of(state);
     }
 
     private static RPModel.View getSpecialModel(BlockGetter level, int wx, int wy, int wz, BlockPos pos, BlockState state) {
@@ -483,36 +471,48 @@ public class ChunkMeshCache {
                     pos.set(wx, wy, wz);
 
                     BlockState state = fastBlockGetter.getBlockState(pos);
-                    FluidState fluidState = fastBlockGetter.getFluidState(pos);
+                    FluidState fluidState = state.getFluidState();
 
                     if (state.isAir() && fluidState.isEmpty()) continue;
 
                     if (isOccluded(fastBlockGetter, wx, wy, wz)) continue;
 
-                    int radius = ModConfig.getInstance().biomeBlend;
-                    int blockColor = blendBlockColor(fastBlockGetter, pos, state, radius);
-                    int waterColor = fluidState.is(FluidTags.WATER) ? blendWaterColor(fastBlockGetter, pos, radius) : 0xFF_FFFFFF;
-                    IntList tints = IntList.of(0xFF000000 | blockColor, 0xFF000000 | waterColor);
+                    // Biome colours are only worked out for models that use them.
+                    int radius = BIOME_BLEND;
+                    int waterColor = 0;
+                    boolean waterColorKnown = false;
+                    Matrix4d transform = new Matrix4d().translate(wx, wy, wz);
 
                     if (!state.isAir()) {
                         if (state.getBlock() != Blocks.BARRIER && state.getBlock() != Blocks.STRUCTURE_BLOCK) {
-                            List<Model> models = getModelForState(fastBlockGetter, wx, wy, wz, state);
-                            if (models != null) {
-                                Matrix4d transform = new Matrix4d().translate(wx, wy, wz);
+                            List<Model> models = getModelForState(fastBlockGetter, wx, wy, wz, state, transform);
+                            if (models != null && !models.isEmpty()) {
+                                IntList tints = NO_TINTS;
+                                for (Model model : models) {
+                                    if (model.mesh.tinted) {
+                                        int blockColor = blendBlockColor(fastBlockGetter, pos, state, radius);
+                                        waterColor = fluidState.is(FluidTags.WATER) ? blendWaterColor(fastBlockGetter, pos, radius) : 0xFF_FFFFFF;
+                                        waterColorKnown = true;
+                                        tints = IntList.of(0xFF000000 | blockColor, 0xFF000000 | waterColor);
+                                        break;
+                                    }
+                                }
                                 for (Model model : models) {
                                     commands.add(new DrawCommand(model.mesh.translucent ? RenderType.TRANSLUCENT : RenderType.SOLID, model, transform, tints));
                                 }
                             }
                         }
 
-                        Platforms.get().renderBlock(level, pos, commands);
+                        Platform.renderBlock(level, pos, commands);
                     }
 
                     if (!fluidState.isEmpty()) {
-                        List<Model> fluidModels = getFluidModel(fastBlockGetter, wx, wy, wz, fluidState);
+                        List<Model> fluidModels = getFluidModel(fastBlockGetter, wx, wy, wz, fluidState, transform);
+                        if (!fluidModels.isEmpty() && !waterColorKnown) {
+                            waterColor = fluidState.is(FluidTags.WATER) ? blendWaterColor(fastBlockGetter, pos, radius) : 0xFF_FFFFFF;
+                        }
                         IntList fluidTints = IntList.of(0xFF000000 | waterColor);
                         RenderType fluidType = RenderType.WATER;
-                        Matrix4d transform = new Matrix4d().translate(wx, wy, wz);
                         for (Model model : fluidModels) {
                             commands.add(new DrawCommand(fluidType, model, transform, fluidTints));
                         }
@@ -523,18 +523,30 @@ public class ChunkMeshCache {
         return commands;
     }
 
-    static void rebuildChunk(Level level, ChunkMesh chunkMesh) {
+    /**
+     * Meshes only what the frame drawn with {@code viewProjection} can show: a model the draw step would leave out as
+     * off the screen ({@link CommandCulling#offScreen}) isn't lit or added. Null meshes everything.
+     */
+    public static void meshFor(@Nullable Matrix4dc viewProjection) {
+        frameViewProjection = viewProjection;
+    }
+
+    /** Whether a model of this mesh drawn with {@code transform} can show in the frame being meshed for. */
+    public static boolean onScreen(Mesh mesh, Matrix4dc transform) {
+        Matrix4dc vp = frameViewProjection;
+        return vp == null || !CommandCulling.offScreen(mesh.positions, vp, transform);
+    }
+
+    public static void rebuildChunk(Level level, ChunkMesh chunkMesh) {
         try {
-            long builtVersion = chunkMesh.currentDirtiness();
             var commands = buildChunkCommands(level, chunkMesh);
-            chunkMesh.setDrawCommands(commands, builtVersion);
+            chunkMesh.setDrawCommands(commands);
         } catch (Exception e) {
-            Platforms.get().getLogger().error("Failed to build chunk {}", chunkMesh.key());
+            Platform.getLogger().error("Failed to build chunk {}", chunkMesh.key());
         }
     }
 
     public static void clear() {
-        CHUNK_CACHE.clear();
         VANILLA_CHUNKS.clear();
         synchronized (BLOCK_MESH_CACHE_LOCK) {
             BLOCK_MESH_CACHE = new Long2ObjectOpenHashMap<>();
@@ -544,17 +556,11 @@ public class ChunkMeshCache {
     public static class ChunkMesh {
         private final BlockPos origin;
         private final long key;
-        private final AtomicLong dirtiness = new AtomicLong(1);
-        private volatile long builtDirtiness = 0;
         private volatile List<DrawCommand> drawCommands = List.of();
 
-        ChunkMesh(BlockPos origin, long key) {
+        public ChunkMesh(BlockPos origin, long key) {
             this.origin = origin;
             this.key = key;
-        }
-
-        public void markDirty() {
-            dirtiness.incrementAndGet();
         }
 
         public BlockPos origin() {
@@ -565,26 +571,12 @@ public class ChunkMeshCache {
             return key;
         }
 
-        public boolean isDirty() {
-            return dirtiness.get() != builtDirtiness;
-        }
-
         public List<DrawCommand> drawCommands() {
             return drawCommands;
         }
 
-        long currentDirtiness() {
-            return dirtiness.get();
-        }
-
         public void setDrawCommands(List<DrawCommand> drawCommands) {
             this.drawCommands = drawCommands;
-            this.builtDirtiness = dirtiness.get();
-        }
-
-        void setDrawCommands(List<DrawCommand> drawCommands, long builtDirtiness) {
-            this.drawCommands = drawCommands;
-            this.builtDirtiness = builtDirtiness;
         }
     }
 }

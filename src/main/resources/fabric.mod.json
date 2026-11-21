@@ -3,9 +3,9 @@
   "id": "dailycams",
   "version": "${version}",
   "name": "Daily Cams",
-  "description": "Players place virtual cameras with /dailycam set. Every day the server renders what each camera sees (using Camera Obscura) and posts the picture to a webhook.",
+  "description": "Players place virtual cameras with /dailycam set. Every day the server renders what each camera sees and posts the picture to a webhook.",
   "authors": ["kunaigear"],
-  "license": "MIT",
+  "license": ["MIT", "AGPL-3.0-only"],
   "environment": "*",
   "entrypoints": {
     "main": ["io.github.kunaigear.dailycams.DailyCams"]
@@ -15,7 +15,8 @@
     "fabricloader": ">=0.19.5",
     "fabric-api": "*",
     "minecraft": "~${minecraft_version}",
-    "camera-obscura": ">=${camera_obscura_version}",
+    "polymer-resource-pack": "*",
+    "polymer-virtual-entity": "*",
     "java": ">=25"
   }
 }

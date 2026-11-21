@@ -1,3 +1,8 @@
+/*
+ * Derived from Camera Obscura 2.1.4+26.3 by tomalbrc (https://github.com/tomalbrc/camera-obscura).
+ * Copyright (c) 2026 tomalbrc. Modified for Daily Cams by kunaigear, November 2026.
+ * Licensed under the GNU Affero General Public License, version 3: see LICENSE-AGPL in the repository root.
+ */
 package io.github.kunaigear.dailycams.obscura.util.resource;
 
 import com.google.gson.JsonArray;
@@ -5,7 +10,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import io.github.kunaigear.dailycams.obscura.json.CachedIdentifierDeserializer;
 import io.github.kunaigear.dailycams.obscura.platform.AssetFetcher;
-import io.github.kunaigear.dailycams.obscura.platform.Platforms;
+import io.github.kunaigear.dailycams.obscura.platform.Platform;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
@@ -47,7 +52,7 @@ public class ItemModelPathResolver {
                 processModelObject(root.getAsJsonObject("model"), paths);
             }
         } catch (Exception e) {
-            Platforms.get().getLogger().error("Error while processing ItemModelPaths for " + fileLocation, e);
+            Platform.getLogger().error("Error while processing ItemModelPaths for " + fileLocation, e);
         }
     }
 

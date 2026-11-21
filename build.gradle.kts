@@ -24,17 +24,14 @@ dependencies {
     implementation("net.fabricmc:fabric-loader:${p("loader_version")}")
     implementation("net.fabricmc.fabric-api:fabric-api:${p("fabric_api_version")}")
 
-    // The renderer. Required at runtime, not bundled.
-    implementation("maven.modrinth:camera-obscura:${p("camera_obscura_version")}")
-
-    // Camera Obscura's own runtime dependencies (only needed for `runServer` in dev).
-    for (module in listOf("polymer-core", "polymer-resource-pack", "polymer-resource-pack-extras",
-                          "polymer-virtual-entity", "polymer-autohost")) {
+    // The renderer reads game assets from Polymer's resource pack and draws Polymer's virtual entities.
+    // Required at runtime, not bundled.
+    for (module in listOf("polymer-resource-pack", "polymer-virtual-entity", "polymer-autohost")) {
+        implementation("eu.pb4:$module:${p("polymer_version")}")
+    }
+    for (module in listOf("polymer-core", "polymer-resource-pack-extras")) {
         runtimeOnly("eu.pb4:$module:${p("polymer_version")}")
     }
-    // For a mixin into Camera Obscura's Polymer lookup. Camera Obscura brings Polymer at runtime.
-    compileOnly("eu.pb4:polymer-virtual-entity:${p("polymer_version")}")
-
 }
 
 java {
@@ -52,14 +49,13 @@ tasks.processResources {
         "version" to project.version,
         "minecraft_version" to p("minecraft_version"),
         "loader_version" to p("loader_version"),
-        "camera_obscura_version" to p("camera_obscura_version"),
     )
     inputs.properties(props)
     filesMatching("fabric.mod.json") { expand(props) }
 }
 
 tasks.jar {
-    from("LICENSE")
+    from("LICENSE", "LICENSE-AGPL")
 }
 
 // ---------------------------------------------------------------------------------------------

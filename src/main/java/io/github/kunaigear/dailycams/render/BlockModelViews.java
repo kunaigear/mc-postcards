@@ -1,7 +1,7 @@
 package io.github.kunaigear.dailycams.render;
 
-import de.tomalbrc.cameraobscura.model.resource.RPModel;
-import de.tomalbrc.cameraobscura.util.resource.RPHelper;
+import io.github.kunaigear.dailycams.obscura.model.resource.RPModel;
+import io.github.kunaigear.dailycams.obscura.util.resource.RPHelper;
 import it.unimi.dsi.fastutil.objects.Reference2ObjectOpenHashMap;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.Nullable;

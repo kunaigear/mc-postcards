@@ -45,6 +45,8 @@ public final class DailyCamsConfig {
     public int renderDistance = 16;
     /** Supersampling factor (1 = off). */
     public int ssaa = 2;
+    /** Whether mobs, players and other entities appear in pictures. */
+    public boolean renderEntities = true;
     /**
      * How much of one CPU core a render may use (0.05-1.0). The render also pauses for a second whenever a
      * server tick takes longer than 25 ms or starts late. Lower = slower renders, less competition.

@@ -1,8 +1,8 @@
 package io.github.kunaigear.dailycams.render;
 
 import io.github.kunaigear.dailycams.config.DailyCamsConfig;
-import de.tomalbrc.cameraobscura.renderer.ChunkMeshCache;
-import de.tomalbrc.cameraobscura.sore.rasterizer.Framebuffer;
+import io.github.kunaigear.dailycams.obscura.renderer.ChunkMeshCache;
+import io.github.kunaigear.dailycams.obscura.sore.rasterizer.Framebuffer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.attribute.EnvironmentAttributes;

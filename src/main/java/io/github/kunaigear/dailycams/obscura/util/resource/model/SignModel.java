@@ -1,3 +1,8 @@
+/*
+ * Derived from Camera Obscura 2.1.4+26.3 by tomalbrc (https://github.com/tomalbrc/camera-obscura).
+ * Copyright (c) 2026 tomalbrc. Modified for Daily Cams by kunaigear, November 2026.
+ * Licensed under the GNU Affero General Public License, version 3: see LICENSE-AGPL in the repository root.
+ */
 package io.github.kunaigear.dailycams.obscura.util.resource.model;
 
 import io.github.kunaigear.dailycams.obscura.model.resource.RPModel;
@@ -13,9 +18,9 @@ public class SignModel {
     public static RPModel.View get(BlockState blockState) {
         RPModel rpModel;
         if (blockState.is(BlockTags.SIGNS))
-            rpModel = RPHelper.loadModel(SignModel.class.getResourceAsStream("/builtin/sign.json"));
+            rpModel = RPHelper.loadModel(SignModel.class.getResourceAsStream("/dailycams/obscura/builtin/sign.json"));
         else
-            rpModel = RPHelper.loadModel(SignModel.class.getResourceAsStream("/builtin/hanging_sign.json"));
+            rpModel = RPHelper.loadModel(SignModel.class.getResourceAsStream("/dailycams/obscura/builtin/hanging_sign.json"));
 
         var rot = blockState.hasProperty(StandingSignBlock.ROTATION) ? (RotationSegment.convertToDegrees(blockState.getValue(StandingSignBlock.ROTATION)) + 180) % 360 :
                 blockState.hasProperty(HorizontalDirectionalBlock.FACING) ? (blockState.getValue(HorizontalDirectionalBlock.FACING).toYRot() + 180) % 360 : 0;

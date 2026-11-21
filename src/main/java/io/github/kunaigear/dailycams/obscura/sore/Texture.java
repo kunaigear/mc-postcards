@@ -1,3 +1,8 @@
+/*
+ * Derived from Camera Obscura 2.1.4+26.3 by tomalbrc (https://github.com/tomalbrc/camera-obscura).
+ * Copyright (c) 2026 tomalbrc. Modified for Daily Cams by kunaigear, November 2026.
+ * Licensed under the GNU Affero General Public License, version 3: see LICENSE-AGPL in the repository root.
+ */
 package io.github.kunaigear.dailycams.obscura.sore;
 
 import com.google.gson.*;
@@ -28,6 +33,8 @@ public final class Texture {
 
     private final int sheetWidth, sheetHeight;
     private final int frameWidth, frameHeight;
+    /** {@code size - 1} for a power-of-two frame size, where wrapping is a mask instead of a division; else -1. */
+    private final int widthMask, heightMask;
     private final int[] frameOffsets;
     private final int[] frameTimes;
     private final int totalDuration;
@@ -46,6 +53,8 @@ public final class Texture {
         this.sheetHeight = height;
         this.frameWidth = frameWidth;
         this.frameHeight = frameHeight;
+        this.widthMask = Integer.bitCount(frameWidth) == 1 ? frameWidth - 1 : -1;
+        this.heightMask = Integer.bitCount(frameHeight) == 1 ? frameHeight - 1 : -1;
         this.frameOffsets = frameOffsets;
         this.frameTimes = frameTimes;
         this.totalDuration = Arrays.stream(frameTimes).sum();
@@ -74,6 +83,8 @@ public final class Texture {
         this.sheetHeight = height;
         this.frameWidth = frameWidth;
         this.frameHeight = frameHeight;
+        this.widthMask = Integer.bitCount(frameWidth) == 1 ? frameWidth - 1 : -1;
+        this.heightMask = Integer.bitCount(frameHeight) == 1 ? frameHeight - 1 : -1;
         this.frameOffsets = frameOffsets;
         this.frameTimes = frameTimes;
         this.totalDuration = Arrays.stream(frameTimes).sum();
@@ -302,8 +313,9 @@ public final class Texture {
     }
 
     private int sampleFrame(int frameIdx, double u, double v) {
-        int x = floorMod((int) Math.floor(u * frameWidth), frameWidth);
-        int y = floorMod((int) Math.floor(v * frameHeight), frameHeight);
+        int fx = (int) Math.floor(u * frameWidth), fy = (int) Math.floor(v * frameHeight);
+        int x = widthMask >= 0 ? fx & widthMask : floorMod(fx, frameWidth);
+        int y = heightMask >= 0 ? fy & heightMask : floorMod(fy, frameHeight);
         int offsetY = frameOffsets[frameIdx];
         int pixelIndex = (offsetY + y) * sheetWidth + x;
 

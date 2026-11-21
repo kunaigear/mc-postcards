@@ -2,7 +2,7 @@ package io.github.kunaigear.dailycams.render;
 
 import io.github.kunaigear.dailycams.DailyCams;
 import io.github.kunaigear.dailycams.mixin.ChunkMapInvoker;
-import de.tomalbrc.cameraobscura.renderer.ChunkMeshCache;
+import io.github.kunaigear.dailycams.obscura.renderer.ChunkMeshCache;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.FluidTags;

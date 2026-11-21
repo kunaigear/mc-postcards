@@ -1,11 +1,14 @@
+/*
+ * Derived from Camera Obscura 2.1.4+26.3 by tomalbrc (https://github.com/tomalbrc/camera-obscura).
+ * Copyright (c) 2026 tomalbrc. Modified for Daily Cams by kunaigear, November 2026.
+ * Licensed under the GNU Affero General Public License, version 3: see LICENSE-AGPL in the repository root.
+ */
 package io.github.kunaigear.dailycams.obscura.util.resource;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
-import io.github.kunaigear.dailycams.obscura.Components;
-import io.github.kunaigear.dailycams.obscura.command.PresetManager;
 import io.github.kunaigear.dailycams.obscura.json.CachedIdentifierDeserializer;
 import io.github.kunaigear.dailycams.obscura.json.ConditionDeserializer;
 import io.github.kunaigear.dailycams.obscura.json.MultipartDefinitionDeserializer;
@@ -16,7 +19,7 @@ import io.github.kunaigear.dailycams.obscura.model.resource.RPModel;
 import io.github.kunaigear.dailycams.obscura.model.resource.state.MultipartDefinition;
 import io.github.kunaigear.dailycams.obscura.model.resource.state.Variant;
 import io.github.kunaigear.dailycams.obscura.platform.AssetFetcher;
-import io.github.kunaigear.dailycams.obscura.platform.Platforms;
+import io.github.kunaigear.dailycams.obscura.platform.Platform;
 import io.github.kunaigear.dailycams.obscura.renderer.ChunkMeshCache;
 import io.github.kunaigear.dailycams.obscura.renderer.EntityRenderers;
 import io.github.kunaigear.dailycams.obscura.renderer.entity.ItemStackRenderer;
@@ -25,11 +28,11 @@ import io.github.kunaigear.dailycams.obscura.util.BuiltinEntityModels;
 import io.github.kunaigear.dailycams.obscura.util.Constants;
 import io.github.kunaigear.dailycams.obscura.util.ImageUtils;
 import io.github.kunaigear.dailycams.obscura.util.SimpleCodecDeserializer;
+import io.github.kunaigear.dailycams.render.PlayerSkins;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import it.unimi.dsi.fastutil.objects.Reference2ObjectArrayMap;
 import net.minecraft.commands.arguments.blocks.BlockStateParser;
 import net.minecraft.core.Direction;
-import net.minecraft.core.component.DataComponentMap;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
@@ -68,14 +71,6 @@ public class RPHelper {
             .registerTypeAdapter(RPModel.ItemTransform.class, new SimpleCodecDeserializer<>(RPModel.ItemTransform.CODEC))
             .registerTypeAdapter(RPModel.TextureEntry.class, new RPModel.TextureEntry.Deserializer())
             .registerTypeAdapter(Texture.AnimationMeta.class, new Texture.AnimationMeta.Deserializer())
-
-            .registerTypeAdapter(DataComponentMap.class, new PresetManager.ComponentMapDeserializer())
-            .registerTypeAdapter(Components.Resolution.class, new SimpleCodecDeserializer<>(Components.Resolution.CODEC))
-            .registerTypeAdapter(Components.VideoParams.class, new SimpleCodecDeserializer<>(Components.VideoParams.CODEC))
-            .registerTypeAdapter(Components.ColorMode.class, new SimpleCodecDeserializer<>(Components.ColorMode.CODEC))
-            .registerTypeAdapter(Components.DitherMode.class, new SimpleCodecDeserializer<>(Components.DitherMode.CODEC))
-            .registerTypeAdapter(Components.MediaData.class, new SimpleCodecDeserializer<>(Components.MediaData.CODEC))
-
             .create();
     private static final Map<Identifier, RPModel> modelResources = new Reference2ObjectArrayMap<>();
     private static final Map<BlockState, RPBlockState> blockStateResources = new Reference2ObjectArrayMap<>();
@@ -97,7 +92,7 @@ public class RPHelper {
     }
 
     public static AssetFetcher getBuilder() {
-        return Platforms.get().getAssetFetcher();
+        return Platform.getAssetFetcher();
     }
 
     @Nullable
@@ -170,7 +165,7 @@ public class RPHelper {
     private static Texture getMapTexture(String m) {
         var id = Integer.parseInt(m);
         var mapId = new MapId(id);
-        MinecraftServer minecraftServer = Platforms.get().getMinecraftServer();
+        MinecraftServer minecraftServer = Platform.getMinecraftServer();
         var data = minecraftServer.getDataStorage().get(MapItemSavedData.type(mapId));
         if (data == null) {
             return Texture.DEFAULT_TEXTURE;
@@ -180,8 +175,10 @@ public class RPHelper {
     }
 
     private static Texture getPlayerTexture(String uuid) {
+        Texture known = PlayerSkins.get(uuid);
+        if (known != null) return known;
         try {
-            MinecraftServer nmsServer = Platforms.get().getMinecraftServer();
+            MinecraftServer nmsServer = Platform.getMinecraftServer();
 
             var id = nmsServer.services().profileResolver().fetchById(UUID.fromString(uuid));
             if (id.isEmpty())
@@ -199,7 +196,7 @@ public class RPHelper {
 
             return tex;
         } catch (Exception e) {
-            Platforms.get().getLogger().error("Error fetching player texture!", e);
+            Platform.getLogger().error("Error fetching player texture!", e);
         }
 
         return Texture.DEFAULT_TEXTURE;

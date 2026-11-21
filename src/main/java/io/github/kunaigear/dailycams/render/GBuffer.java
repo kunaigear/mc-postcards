@@ -1,7 +1,7 @@
 package io.github.kunaigear.dailycams.render;
 
-import de.tomalbrc.cameraobscura.sore.Uniforms;
-import de.tomalbrc.cameraobscura.sore.shader.FragmentIn;
+import io.github.kunaigear.dailycams.obscura.sore.Uniforms;
+import io.github.kunaigear.dailycams.obscura.sore.shader.FragmentIn;
 import net.minecraft.util.ARGB;
 import org.jetbrains.annotations.Nullable;
 
@@ -98,7 +98,7 @@ public final class GBuffer {
             return;
         }
 
-        int tex = in.texture.sampleAnimated(in.u, in.v, uniforms.time);
+        int tex = in.texel;
         int tint = in.tint;
         int r = ((tex >> 16) & 255) * ARGB.red(tint) / 255;
         int g = ((tex >> 8) & 255) * ARGB.green(tint) / 255;

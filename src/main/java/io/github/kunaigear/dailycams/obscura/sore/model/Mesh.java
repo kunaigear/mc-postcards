@@ -1,3 +1,8 @@
+/*
+ * Derived from Camera Obscura 2.1.4+26.3 by tomalbrc (https://github.com/tomalbrc/camera-obscura).
+ * Copyright (c) 2026 tomalbrc. Modified for Daily Cams by kunaigear, November 2026.
+ * Licensed under the GNU Affero General Public License, version 3: see LICENSE-AGPL in the repository root.
+ */
 package io.github.kunaigear.dailycams.obscura.sore.model;
 
 import io.github.kunaigear.dailycams.obscura.sore.Texture;
@@ -14,6 +19,8 @@ public final class Mesh {
     public final Texture[] vertexTextures;
     public final boolean ao;
     public final boolean translucent;
+    /** Whether any vertex has a tint index, so drawing it reads the draw command's tints. */
+    public final boolean tinted;
 
     public Mesh(float[] positions, float[] normals, float[] uvs, int[] indices, int @Nullable [] tintIndices, boolean[] shade, Texture[] vertexTextures, boolean ao, boolean translucent) {
         this.positions = positions;
@@ -25,6 +32,9 @@ public final class Mesh {
         this.vertexTextures = vertexTextures;
         this.ao = ao;
         this.translucent = translucent;
+        boolean tinted = false;
+        if (tintIndices != null) for (int t : tintIndices) tinted |= t != -1;
+        this.tinted = tinted;
     }
 
     public static Mesh skybox(Texture texture) {

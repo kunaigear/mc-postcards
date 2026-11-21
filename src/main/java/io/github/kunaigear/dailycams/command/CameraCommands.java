@@ -41,6 +41,7 @@ import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -487,6 +488,8 @@ public final class CameraCommands {
         return 0;
     }
 
+    private static final String SOURCE_URL = "https://github.com/kunaigear/mc-postcards";
+
     private static int help(CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack src = ctx.getSource();
         MutableComponent out = Component.literal("Daily Cams").withStyle(ChatFormatting.GOLD)
@@ -505,6 +508,9 @@ public final class CameraCommands {
             out.append(Component.literal("\n  /dailycam webhook <name> <url|default> | runall | reload").withStyle(ChatFormatting.RED));
         }
         out.append(Component.literal("\n/" + ALIAS + " is short for /" + COMMAND + ".").withStyle(ChatFormatting.GRAY));
+        // The renderer is a modified copy of Camera Obscura, under the AGPL, which asks to offer the source to players.
+        out.append(Component.literal("\nSource code (AGPL-3.0): " + SOURCE_URL).withStyle(s -> s.withColor(ChatFormatting.GRAY)
+                .withClickEvent(new ClickEvent.OpenUrl(URI.create(SOURCE_URL)))));
         src.sendSuccess(() -> out, false);
         return 1;
     }

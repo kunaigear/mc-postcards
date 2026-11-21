@@ -1,22 +1,22 @@
 package io.github.kunaigear.dailycams.render;
 
-import de.tomalbrc.cameraobscura.sore.pipeline.DrawCommand;
+import io.github.kunaigear.dailycams.obscura.sore.pipeline.DrawCommand;
 import org.joml.Vector3dc;
 
 import java.util.Arrays;
 import java.util.List;
 
 /**
- * Camera Obscura sorts the draw commands by their distance from the camera, working the distance out again, into a
- * new vector, for both sides of every comparison. With our renders' hundreds of thousands of commands, that was a
- * seventh of the drawing time. This sorts them the same way with each distance worked out once.
+ * Sorts the draw commands by their distance from the camera, with each distance worked out once: comparing
+ * {@code worldPosition()} on both sides of every comparison was a seventh of the drawing time with our renders'
+ * hundreds of thousands of commands.
  */
 public final class DrawOrder {
     private DrawOrder() {}
 
     private record ByDistance(DrawCommand command, double distanceSquared) {}
 
-    /** A stable sort on the same keys, so the order comes out exactly as Camera Obscura's. */
+    /** A stable sort, so commands at the same distance keep the order they were added in. */
     public static void sortByDistance(List<DrawCommand> commands, Vector3dc camera, boolean farthestFirst) {
         ByDistance[] keyed = new ByDistance[commands.size()];
         for (int i = 0; i < keyed.length; i++) {

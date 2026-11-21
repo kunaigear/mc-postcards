@@ -1,3 +1,8 @@
+/*
+ * Derived from Camera Obscura 2.1.4+26.3 by tomalbrc (https://github.com/tomalbrc/camera-obscura).
+ * Copyright (c) 2026 tomalbrc. Modified for Daily Cams by kunaigear, November 2026.
+ * Licensed under the GNU Affero General Public License, version 3: see LICENSE-AGPL in the repository root.
+ */
 package io.github.kunaigear.dailycams.obscura.sore.shader;
 
 import io.github.kunaigear.dailycams.obscura.sore.Uniforms;
@@ -7,10 +12,12 @@ import org.joml.Vector3d;
 import org.joml.Vector4d;
 
 public final class MatteShader implements Shader {
+    private static final Vector4d LOCAL = new Vector4d();
+
     @Override
     public void vertex(Model model, int index, Uniforms uniforms, VertexOut out) {
         int p = index * 3;
-        Vector4d localPos = new Vector4d(model.positions()[p], model.positions()[p + 1], model.positions()[p + 2], 1.0f);
+        Vector4d localPos = LOCAL.set(model.positions()[p], model.positions()[p + 1], model.positions()[p + 2], 1.0f);
         Shader.populateVertexCommon(model, index, uniforms, out, localPos);
     }
 
@@ -34,6 +41,7 @@ public final class MatteShader implements Shader {
 
         double light = (ambientLight - Math.min(1.0, 0.8f - 0.9f * in.ao)) * faceLight;
         int tex = in.texture.sampleAnimated(in.u, in.v, uniforms.time);
+        in.texel = tex;
 
         int alpha = (tex >>> 24) & 0xFF;
         double texR = ((tex >> 16) & 0xFF) / 255.0;

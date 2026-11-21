@@ -1,3 +1,8 @@
+/*
+ * Derived from Camera Obscura 2.1.4+26.3 by tomalbrc (https://github.com/tomalbrc/camera-obscura).
+ * Copyright (c) 2026 tomalbrc. Modified for Daily Cams by kunaigear, November 2026.
+ * Licensed under the GNU Affero General Public License, version 3: see LICENSE-AGPL in the repository root.
+ */
 package io.github.kunaigear.dailycams.obscura.sore.shader;
 
 import io.github.kunaigear.dailycams.obscura.sore.Uniforms;
@@ -5,6 +10,9 @@ import io.github.kunaigear.dailycams.obscura.sore.model.Model;
 import org.joml.Vector4d;
 
 public interface Shader {
+    /** Reused for every vertex: the render thread draws one frame at a time. */
+    Vector4d WORLD = new Vector4d(), CLIP = new Vector4d(), NORMAL = new Vector4d();
+
     static int clamp255(double v) {
         return (int) (Math.clamp(v, 0f, 1f) * 255f);
     }
@@ -12,14 +20,11 @@ public interface Shader {
     static void populateVertexCommon(Model model, int index, Uniforms uniforms, VertexOut out, Vector4d localPos) {
         int p = index * 3;
 
-        Vector4d worldPos = new Vector4d(localPos);
+        Vector4d worldPos = WORLD.set(localPos);
         uniforms.model.transform(worldPos);
 
-        Vector4d clipPos = new Vector4d(localPos);
+        Vector4d clipPos = CLIP.set(localPos);
         uniforms.mvp.transform(clipPos);
-
-        Vector4d normal = new Vector4d(model.mesh.normals[p], model.mesh.normals[p + 1], model.mesh.normals[p + 2], 0.0f);
-        uniforms.normalTransform.transform(normal);
 
         out.clipX = clipPos.x;
         out.clipY = clipPos.y;
@@ -30,9 +35,13 @@ public interface Shader {
         out.worldY = worldPos.y;
         out.worldZ = worldPos.z;
 
-        out.normalX = normal.x;
-        out.normalY = normal.y;
-        out.normalZ = normal.z;
+        if (uniforms.normals) {
+            Vector4d normal = NORMAL.set(model.mesh.normals[p], model.mesh.normals[p + 1], model.mesh.normals[p + 2], 0.0f);
+            uniforms.normalTransform.transform(normal);
+            out.normalX = normal.x;
+            out.normalY = normal.y;
+            out.normalZ = normal.z;
+        }
 
         out.localNormalX = model.mesh.normals[p];
         out.localNormalY = model.mesh.normals[p + 1];

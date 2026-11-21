@@ -1,7 +1,7 @@
 package io.github.kunaigear.dailycams.render;
 
-import de.tomalbrc.cameraobscura.sore.model.Model;
-import de.tomalbrc.cameraobscura.sore.rasterizer.Framebuffer;
+import io.github.kunaigear.dailycams.obscura.sore.model.Model;
+import io.github.kunaigear.dailycams.obscura.sore.rasterizer.Framebuffer;
 import org.joml.Matrix4d;
 import org.joml.Matrix4dc;
 
@@ -60,9 +60,20 @@ public final class CommandCulling {
         drawnSince[(idx / width >> TILE_SHIFT) * tilesX + (idx % width >> TILE_SHIFT)] = true;
     }
 
-    /** {@code viewProjection} is the projection times the view matrix, as Camera Obscura multiplies them. */
+    /** {@code viewProjection} is the projection times the view matrix, as the pipeline multiplies them. */
     public static boolean culled(Model model, Matrix4dc viewProjection, Matrix4dc transform) {
-        float[] p = model.positions();
+        return test(model.positions(), viewProjection, transform, true);
+    }
+
+    /**
+     * Whether {@link #culled} would leave out a model with these positions for being off the screen or in front of the
+     * near plane, which doesn't depend on what was drawn before. Lets the meshing skip what would never be drawn.
+     */
+    public static boolean offScreen(float[] positions, Matrix4dc viewProjection, Matrix4dc transform) {
+        return test(positions, viewProjection, transform, false);
+    }
+
+    private static boolean test(float[] p, Matrix4dc viewProjection, Matrix4dc transform, boolean behind) {
         if (p.length == 0) return false;
         Matrix4d m = MVP.set(viewProjection).mul(transform);
         boolean left = true, right = true, below = true, above = true, near = true, anyNear = false;
@@ -92,6 +103,7 @@ public final class CommandCulling {
             }
         }
         if (left | right | below | above | near) return true;
+        if (!behind) return false;
         // Clipped at the near plane, a triangle's corners move: only test what's wholly behind it.
         return !anyNear && behindDrawn(minX - 1, minY - 1, maxX + 1, maxY + 1, minZ - DEPTH_MARGIN * (1 + Math.abs(minZ)));
     }

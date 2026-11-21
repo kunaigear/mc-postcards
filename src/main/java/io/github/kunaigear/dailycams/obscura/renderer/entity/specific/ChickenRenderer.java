@@ -1,6 +1,11 @@
+/*
+ * Derived from Camera Obscura 2.1.4+26.3 by tomalbrc (https://github.com/tomalbrc/camera-obscura).
+ * Copyright (c) 2026 tomalbrc. Modified for Daily Cams by kunaigear, November 2026.
+ * Licensed under the GNU Affero General Public License, version 3: see LICENSE-AGPL in the repository root.
+ */
 package io.github.kunaigear.dailycams.obscura.renderer.entity.specific;
 
-import io.github.kunaigear.dailycams.obscura.platform.Platforms;
+import io.github.kunaigear.dailycams.obscura.platform.Platform;
 import io.github.kunaigear.dailycams.obscura.renderer.entity.LivingEntityRenderer;
 import io.github.kunaigear.dailycams.obscura.renderer.entity.ModelBakery;
 import io.github.kunaigear.dailycams.obscura.sore.model.Model;
@@ -119,7 +124,7 @@ public class ChickenRenderer implements LivingEntityRenderer<Chicken> {
                 ModelBakery.PartPose.offsetAndRotation(0.0F, 16.0F, 0.0F, (Mth.PI / 2), 0.0F, 0.0F)
         );
 
-        if (variant == Platforms.get().getRegistryAccess().getOrThrow(ChickenVariants.COLD)) {
+        if (variant == Platform.getRegistryAccess().getOrThrow(ChickenVariants.COLD)) {
             ModelBakery.PartDefinition coldHead = root.addOrReplaceChild(
                     "head",
                     ModelBakery.CubeListBuilder.create()

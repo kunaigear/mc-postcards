@@ -1,19 +1,18 @@
 package io.github.kunaigear.dailycams.render;
 
-import io.github.kunaigear.dailycams.mixin.ChunkMeshCacheInvoker;
+import io.github.kunaigear.dailycams.obscura.renderer.ChunkMeshCache;
 import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
 import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.ChunkAccess;
 
-/** The loaded chunks as Camera Obscura sees them: its own copy, which any thread may read. */
+/** The loaded chunks: a copy kept by the renderer, which any thread may read. */
 public final class LoadedChunks {
     private LoadedChunks() {}
 
     /** Loaded chunks by {@link net.minecraft.world.level.ChunkPos#pack}. Don't modify. */
     public static Long2ReferenceOpenHashMap<ChunkAccess> of(Level level) {
-        var ref = ChunkMeshCacheInvoker.dailycams$loadedChunks().get(level);
-        return ref != null ? ref.get() : new Long2ReferenceOpenHashMap<>();
+        return ChunkMeshCache.loadedChunks(level);
     }
 
     /** The top of the highest non-empty section of any loaded chunk: above it, every block Camera Obscura reads is air. */

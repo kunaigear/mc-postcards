@@ -1,7 +1,7 @@
 package io.github.kunaigear.dailycams.render;
 
-import de.tomalbrc.cameraobscura.renderer.ChunkMeshCache;
-import de.tomalbrc.cameraobscura.sore.Camera;
+import io.github.kunaigear.dailycams.obscura.renderer.ChunkMeshCache;
+import io.github.kunaigear.dailycams.obscura.sore.Camera;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;

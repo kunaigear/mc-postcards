@@ -4,6 +4,7 @@ import io.github.kunaigear.dailycams.camera.CameraSpec;
 import io.github.kunaigear.dailycams.camera.CameraStore;
 import io.github.kunaigear.dailycams.command.CameraCommands;
 import io.github.kunaigear.dailycams.config.DailyCamsConfig;
+import io.github.kunaigear.dailycams.obscura.platform.Platform;
 import io.github.kunaigear.dailycams.render.LodCache;
 import io.github.kunaigear.dailycams.render.RenderQueue;
 import io.github.kunaigear.dailycams.schedule.DailyScheduler;
@@ -77,6 +78,7 @@ public final class DailyCams implements ModInitializer {
     @Override
     public void onInitialize() {
         instance = this;
+        Platform.init();
         dir = FabricLoader.getInstance().getConfigDir().resolve(MOD_ID);
         // Loads chunks around a camera while it renders. Not saved with the world.
         ticketType = Registry.register(BuiltInRegistries.TICKET_TYPE, Identifier.fromNamespaceAndPath(MOD_ID, "render"),

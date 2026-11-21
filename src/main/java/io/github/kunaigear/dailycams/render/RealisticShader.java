@@ -1,9 +1,8 @@
 package io.github.kunaigear.dailycams.render;
 
 import io.github.kunaigear.dailycams.config.DailyCamsConfig;
-import io.github.kunaigear.dailycams.mixin.FastBlockGetterInvoker;
-import de.tomalbrc.cameraobscura.color.BlockColors;
-import de.tomalbrc.cameraobscura.renderer.ChunkMeshCache;
+import io.github.kunaigear.dailycams.obscura.color.BlockColors;
+import io.github.kunaigear.dailycams.obscura.renderer.ChunkMeshCache;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.FluidTags;
@@ -685,7 +684,7 @@ final class RealisticShader {
             if (baked.tint != LodBlocks.Tint.NONE && (state != tintState || pos.asLong() != tintPos)) {
                 tintState = state;
                 tintPos = pos.asLong();
-                ChunkAccess chunk = ((FastBlockGetterInvoker) (Object) blocks).dailycams$getChunkAt(pos);
+                ChunkAccess chunk = blocks.getChunkAt(pos);
                 int tc = chunk != null ? BlockColors.get(chunk, state, pos) : -1;
                 tint[0] = toLinear(((tc >> 16) & 255) / 255.0); tint[1] = toLinear(((tc >> 8) & 255) / 255.0); tint[2] = toLinear((tc & 255) / 255.0);
             }

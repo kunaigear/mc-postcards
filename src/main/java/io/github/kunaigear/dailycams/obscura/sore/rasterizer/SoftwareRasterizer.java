@@ -1,3 +1,8 @@
+/*
+ * Derived from Camera Obscura 2.1.4+26.3 by tomalbrc (https://github.com/tomalbrc/camera-obscura).
+ * Copyright (c) 2026 tomalbrc. Modified for Daily Cams by kunaigear, November 2026.
+ * Licensed under the GNU Affero General Public License, version 3: see LICENSE-AGPL in the repository root.
+ */
 package io.github.kunaigear.dailycams.obscura.sore.rasterizer;
 
 import io.github.kunaigear.dailycams.obscura.sore.ScreenVertex;
@@ -6,6 +11,12 @@ import io.github.kunaigear.dailycams.obscura.sore.Uniforms;
 import io.github.kunaigear.dailycams.obscura.sore.shader.FragmentIn;
 import io.github.kunaigear.dailycams.obscura.sore.shader.Shader;
 import io.github.kunaigear.dailycams.obscura.sore.shader.VertexOut;
+
+import io.github.kunaigear.dailycams.obscura.sore.shader.MatteShader;
+import io.github.kunaigear.dailycams.render.CommandCulling;
+import io.github.kunaigear.dailycams.render.GBuffer;
+import io.github.kunaigear.dailycams.render.RenderFlags;
+import io.github.kunaigear.dailycams.render.SeeThrough;
 
 import java.util.Arrays;
 
@@ -25,7 +36,6 @@ public class SoftwareRasterizer implements Rasterizer {
     private final double[] attrAO = new double[3];
     private final double[] attrSkyLight = new double[3];
     private final double[] attrBlockLight = new double[3];
-    private boolean wireframe = false;
 
     public SoftwareRasterizer(Framebuffer framebuffer) {
         this.framebuffer = framebuffer;
@@ -60,17 +70,8 @@ public class SoftwareRasterizer implements Rasterizer {
         Arrays.fill(framebuffer.getColorBuffer(), color);
     }
 
-    public void setWireframe(boolean wireframe) {
-        this.wireframe = wireframe;
-    }
-
     @Override
     public void drawTriangle(Shader shader, Triangle tri, FragmentIn fIn, boolean writeDepth, boolean doubleSided, Uniforms uniforms) {
-        if (wireframe) {
-            drawWireframeTriangle(tri, writeDepth);
-            return;
-        }
-
         ScreenVertex a = tri.a;
         ScreenVertex b = tri.b;
         ScreenVertex c = tri.c;
@@ -107,6 +108,7 @@ public class SoftwareRasterizer implements Rasterizer {
         attrWorldZ[1] = v1.worldZ * b_invW;
         attrWorldZ[2] = v2.worldZ * c_invW;
 
+        boolean normals = uniforms.normals;
         attrNormalX[0] = v0.normalX * a_invW;
         attrNormalX[1] = v1.normalX * b_invW;
         attrNormalX[2] = v2.normalX * c_invW;
@@ -159,6 +161,11 @@ public class SoftwareRasterizer implements Rasterizer {
         double rowW2 = edge(a.x(), a.y(), b.x(), b.y(), minX + 0.5f, minY + 0.5f) * invArea;
 
         int fbWidth = framebuffer.width;
+        // The realistic shader records what each pixel shows (GBuffer) and lights it again itself, and distant
+        // terrain needs glass and water drawn over empty background (SeeThrough). Both turn off the fog here.
+        GBuffer gbuffer = GBuffer.active();
+        SeeThrough seeThrough = SeeThrough.active();
+        boolean record = shader instanceof MatteShader && (gbuffer != null || RenderFlags.noFog());
         double[] depthBuf = framebuffer.getDepthBuffer();
         int[] colorBuf = framebuffer.getColorBuffer();
 
@@ -183,9 +190,11 @@ public class SoftwareRasterizer implements Rasterizer {
                         fIn.worldY = (w0 * attrWorldY[0] + w1 * attrWorldY[1] + w2 * attrWorldY[2]) * recip;
                         fIn.worldZ = (w0 * attrWorldZ[0] + w1 * attrWorldZ[1] + w2 * attrWorldZ[2]) * recip;
 
-                        fIn.normalX = (w0 * attrNormalX[0] + w1 * attrNormalX[1] + w2 * attrNormalX[2]) * recip;
-                        fIn.normalY = (w0 * attrNormalY[0] + w1 * attrNormalY[1] + w2 * attrNormalY[2]) * recip;
-                        fIn.normalZ = (w0 * attrNormalZ[0] + w1 * attrNormalZ[1] + w2 * attrNormalZ[2]) * recip;
+                        if (normals) {
+                            fIn.normalX = (w0 * attrNormalX[0] + w1 * attrNormalX[1] + w2 * attrNormalX[2]) * recip;
+                            fIn.normalY = (w0 * attrNormalY[0] + w1 * attrNormalY[1] + w2 * attrNormalY[2]) * recip;
+                            fIn.normalZ = (w0 * attrNormalZ[0] + w1 * attrNormalZ[1] + w2 * attrNormalZ[2]) * recip;
+                        }
 
                         fIn.localNormalX = (w0 * attrLocalNormalX[0] + w1 * attrLocalNormalX[1] + w2 * attrLocalNormalX[2]) * recip;
                         fIn.localNormalY = (w0 * attrLocalNormalY[0] + w1 * attrLocalNormalY[1] + w2 * attrLocalNormalY[2]) * recip;
@@ -202,7 +211,8 @@ public class SoftwareRasterizer implements Rasterizer {
                         fIn.tint = v0.tint;
                         fIn.shade = v0.shade;
 
-                        int src = shader.fragment(fIn, uniforms);
+                        CommandCulling.drawn(idx);
+                        int src = record ? recordFragment(shader, fIn, uniforms, idx, gbuffer, seeThrough) : shader.fragment(fIn, uniforms);
                         int alpha = (src >>> 24) & 0xFF;
 
                         if (alpha == 255) {
@@ -226,53 +236,24 @@ public class SoftwareRasterizer implements Rasterizer {
         }
     }
 
-    private void drawWireframeTriangle(Triangle tri, boolean writeDepth) {
-        ScreenVertex a = tri.a, b = tri.b, c = tri.c;
-        drawLine(a, b, writeDepth);
-        drawLine(b, c, writeDepth);
-        drawLine(c, a, writeDepth);
-    }
-
-    private void drawLine(ScreenVertex v0, ScreenVertex v1, boolean writeDepth) {
-        int x0 = (int) v0.x(), y0 = (int) v0.y();
-        int x1 = (int) v1.x(), y1 = (int) v1.y();
-
-        double dx = Math.abs(x1 - x0);
-        double dy = -Math.abs(y1 - y0);
-        int sx = x0 < x1 ? 1 : -1;
-        int sy = y0 < y1 ? 1 : -1;
-        double err = dx + dy;
-
-        int wireColor = 0xFF_00FF00;
-
-        while (true) {
-            if (x0 >= 0 && x0 < framebuffer.width && y0 >= 0 && y0 < framebuffer.height) {
-                double t = (x0 - v0.x()) / (v1.x() - v0.x());
-                if (Math.abs(v1.x() - v0.x()) < 1e-5f) {
-                    t = (y0 - v0.y()) / (v1.y() - v0.y());
-                }
-                double depth = v0.z() * (1 - t) + v1.z() * t;
-
-                int idx = y0 * framebuffer.width + x0;
-                if (depth <= framebuffer.getDepthBuffer()[idx]) {
-                    if (writeDepth)
-                        framebuffer.getDepthBuffer()[idx] = depth;
-
-                    framebuffer.getColorBuffer()[idx] = wireColor;
-                }
-            }
-
-            if (x0 == x1 && y0 == y1) break;
-            double e2 = 2 * err;
-            if (e2 >= dy) {
-                err += dy;
-                x0 += sx;
-            }
-            if (e2 <= dx) {
-                err += dx;
-                y0 += sy;
-            }
+    private int recordFragment(Shader shader, FragmentIn in, Uniforms uniforms, int idx, GBuffer gbuffer, SeeThrough seeThrough) {
+        double fogStart = uniforms.fogStart, fogEnd = uniforms.fogEnd;
+        uniforms.fogStart = 1.0e9;
+        uniforms.fogEnd = 2.0e9;
+        int src;
+        try {
+            src = shader.fragment(in, uniforms);
+        } finally {
+            uniforms.fogStart = fogStart;
+            uniforms.fogEnd = fogEnd;
         }
+        if (gbuffer != null) gbuffer.record(idx, in, uniforms, src);
+        int alpha = src >>> 24;
+        if (seeThrough != null && alpha > 0 && alpha < 255) {
+            // Called before the fragment is blended, so the colour buffer still holds what's behind it.
+            if (Double.isInfinite(framebuffer.getDepthBuffer()[idx])) seeThrough.record(idx, alpha, framebuffer.getColorBuffer()[idx]);
+        }
+        return src;
     }
 
     @Override

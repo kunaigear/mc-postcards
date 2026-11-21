@@ -1,6 +1,11 @@
+/*
+ * Derived from Camera Obscura 2.1.4+26.3 by tomalbrc (https://github.com/tomalbrc/camera-obscura).
+ * Copyright (c) 2026 tomalbrc. Modified for Daily Cams by kunaigear, November 2026.
+ * Licensed under the GNU Affero General Public License, version 3: see LICENSE-AGPL in the repository root.
+ */
 package io.github.kunaigear.dailycams.obscura.renderer.entity.specific;
 
-import io.github.kunaigear.dailycams.obscura.platform.Platforms;
+import io.github.kunaigear.dailycams.obscura.platform.Platform;
 import io.github.kunaigear.dailycams.obscura.renderer.entity.FourLeggedRenderer;
 import io.github.kunaigear.dailycams.obscura.renderer.entity.ModelBakery;
 import net.minecraft.core.Holder;
@@ -31,7 +36,7 @@ public class CowRenderer extends FourLeggedRenderer<Cow> {
     }
 
     private void addCustom(ModelBakery.PartDefinition root, Holder<CowVariant> variant) {
-        if (variant == Platforms.get().getRegistryAccess().getOrThrow(CowVariants.WARM)) {
+        if (variant == Platform.getRegistryAccess().getOrThrow(CowVariants.WARM)) {
             root.addOrReplaceChild(
                     "head",
                     ModelBakery.CubeListBuilder.create()
@@ -55,7 +60,7 @@ public class CowRenderer extends FourLeggedRenderer<Cow> {
             );
         }
 
-        if (variant == Platforms.get().getRegistryAccess().getOrThrow(CowVariants.COLD)) {
+        if (variant == Platform.getRegistryAccess().getOrThrow(CowVariants.COLD)) {
             root.addOrReplaceChild(
                     "body",
                     ModelBakery.CubeListBuilder.create()

@@ -1,3 +1,8 @@
+/*
+ * Derived from Camera Obscura 2.1.4+26.3 by tomalbrc (https://github.com/tomalbrc/camera-obscura).
+ * Copyright (c) 2026 tomalbrc. Modified for Daily Cams by kunaigear, November 2026.
+ * Licensed under the GNU Affero General Public License, version 3: see LICENSE-AGPL in the repository root.
+ */
 package io.github.kunaigear.dailycams.obscura.sore.pipeline;
 
 import io.github.kunaigear.dailycams.obscura.sore.Camera;
@@ -8,11 +13,17 @@ import io.github.kunaigear.dailycams.obscura.sore.rasterizer.Rasterizer;
 import io.github.kunaigear.dailycams.obscura.sore.shader.FragmentIn;
 import io.github.kunaigear.dailycams.obscura.sore.shader.Shader;
 import io.github.kunaigear.dailycams.obscura.sore.shader.VertexOut;
+import io.github.kunaigear.dailycams.obscura.sore.shader.MatteShader;
+import io.github.kunaigear.dailycams.render.CommandCulling;
+import io.github.kunaigear.dailycams.render.DrawOrder;
+import io.github.kunaigear.dailycams.render.Throttle;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+import org.joml.Matrix4d;
+import io.github.kunaigear.dailycams.render.GBuffer;
+import java.util.Arrays;
 import org.joml.Matrix4dc;
 import org.joml.Vector3d;
 
-import java.util.Comparator;
 import java.util.List;
 
 public class SoftwareRenderPipeline implements RenderPipeline {
@@ -21,6 +32,11 @@ public class SoftwareRenderPipeline implements RenderPipeline {
     private final List<DrawCommand> opaqueCommands = new ObjectArrayList<>();
     private final List<DrawCommand> transparentCommands = new ObjectArrayList<>();
     private Camera camera;
+    private final Matrix4d viewProjection = new Matrix4d();
+    // Reused for every draw command.
+    private VertexOut[] vertices = new VertexOut[0];
+    private final List<Triangle> triangles = new ObjectArrayList<>();
+    private final FragmentIn fIn = new FragmentIn();
 
     public SoftwareRenderPipeline(Rasterizer rasterizer, Uniforms uniforms, Camera camera) {
         this.rasterizer = rasterizer;
@@ -63,23 +79,27 @@ public class SoftwareRenderPipeline implements RenderPipeline {
     @Override
     public void endFrame() {
         Vector3d camPos = camera.getPosition();
+        viewProjection.set(uniforms.proj).mul(uniforms.view);
+        uniforms.normals = GBuffer.active() != null;
+        CommandCulling.begin(rasterizer.getFramebuffer());
 
-        opaqueCommands.sort(Comparator.comparingDouble(cmd -> cmd.worldPosition().distanceSquared(camPos)));
+        DrawOrder.sortByDistance(opaqueCommands, camPos, false);
 
         for (DrawCommand cmd : opaqueCommands) {
-            executeCommand(cmd, false);
+            executeCommand(cmd);
         }
 
-        transparentCommands.sort((a, b) -> Double.compare(
-                b.worldPosition().distanceSquared(camPos),
-                a.worldPosition().distanceSquared(camPos)));
+        DrawOrder.sortByDistance(transparentCommands, camPos, true);
 
         for (DrawCommand cmd : transparentCommands) {
-            executeCommand(cmd, false);
+            executeCommand(cmd);
         }
     }
 
-    private void executeCommand(DrawCommand cmd, boolean sortTriangles) {
+    private void executeCommand(DrawCommand cmd) {
+        Throttle.checkpoint();
+        // Only terrain: MatteShader's vertices are the model's positions, other shaders may move them.
+        if (cmd.renderType().shader() instanceof MatteShader && CommandCulling.culled(cmd.model(), viewProjection, cmd.transform())) return;
         Model model = cmd.model();
         Shader shader = cmd.renderType().shader();
         Matrix4dc transform = cmd.transform();
@@ -88,17 +108,19 @@ public class SoftwareRenderPipeline implements RenderPipeline {
         uniforms.tints = cmd.tints();
         uniforms.model.set(transform);
         uniforms.mvp.set(uniforms.proj).mul(uniforms.view).mul(transform);
-        uniforms.normalTransform.set(transform).invert().transpose();
+        if (uniforms.normals) uniforms.normalTransform.set(transform).invert().transpose();
 
         int vertexCount = model.positions().length / 3;
-        VertexOut[] vertices = new VertexOut[vertexCount];
+        if (vertices.length < vertexCount) {
+            VertexOut[] grown = Arrays.copyOf(vertices, Math.max(vertexCount, vertices.length * 2));
+            for (int i = vertices.length; i < grown.length; i++) grown[i] = new VertexOut();
+            vertices = grown;
+        }
         for (int i = 0; i < vertexCount; i++) {
-            VertexOut out = new VertexOut();
-            shader.vertex(cmd.model(), i, uniforms, out);
-            vertices[i] = out;
+            shader.vertex(cmd.model(), i, uniforms, vertices[i]);
         }
 
-        List<Triangle> triangles = new ObjectArrayList<>();
+        triangles.clear();
         for (int i = 0; i < model.indices().length; i += 3) {
             VertexOut v0 = vertices[model.indices()[i]];
             VertexOut v1 = vertices[model.indices()[i + 1]];
@@ -107,11 +129,6 @@ public class SoftwareRenderPipeline implements RenderPipeline {
             clipAndAdd(v0, v1, v2, triangles);
         }
 
-        if (sortTriangles) {
-            triangles.sort((a, b) -> Double.compare(b.avgDepth, a.avgDepth));
-        }
-
-        FragmentIn fIn = new FragmentIn();
         for (Triangle tri : triangles) {
             rasterizer.drawTriangle(shader, tri, fIn, writeDepth, cmd.renderType().doubleSided(), uniforms);
         }
