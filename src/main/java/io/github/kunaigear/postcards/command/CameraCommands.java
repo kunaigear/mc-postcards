@@ -498,7 +498,7 @@ public final class CameraCommands {
         if (isAdmin(src)) {
             out.append(Component.literal("\n  /postcard webhook <name> <url|default> | runall | reload").withStyle(ChatFormatting.RED));
         }
-        // The renderer is a modified copy of Camera Obscura, under the AGPL, which asks to offer the source to players.
+        // Postcards is under the AGPL, which asks to offer the source to players.
         out.append(Component.literal("\nSource code (AGPL-3.0): " + SOURCE_URL).withStyle(s -> s.withColor(ChatFormatting.GRAY)
                 .withClickEvent(new ClickEvent.OpenUrl(URI.create(SOURCE_URL)))));
         src.sendSuccess(() -> out, false);

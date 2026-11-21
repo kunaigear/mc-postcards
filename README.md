@@ -58,6 +58,8 @@
 
 ## License
 
-Postcards' own code is [MIT](LICENSE). The renderer in `src/main/java/io/github/kunaigear/postcards/obscura/` is a
-modified copy of [Camera Obscura](https://github.com/tomalbrc/camera-obscura) by tomalbrc, licensed under the
-[AGPL-3.0](LICENSE-AGPL), so the server mod's jar as a whole is under the AGPL-3.0. The client helper is MIT.
+Copyright (c) 2026 kunaigear. Postcards, including the client helper, is licensed under the
+[GNU Affero General Public License, version 3](LICENSE). The renderer in
+`src/main/java/io/github/kunaigear/postcards/obscura/` is a modified copy of
+[Camera Obscura](https://github.com/tomalbrc/camera-obscura) by tomalbrc, under the same license. Each of those files
+says so.

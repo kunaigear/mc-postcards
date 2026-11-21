@@ -55,7 +55,7 @@ tasks.processResources {
 }
 
 tasks.jar {
-    from("LICENSE", "LICENSE-AGPL")
+    from("LICENSE")
 }
 
 // ---------------------------------------------------------------------------------------------
