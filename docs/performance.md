@@ -108,5 +108,31 @@ around a scene instead of a wall of fog:
 ![6 chunks vs 16 chunks](images/render-distance.jpg)
 
 Most of a render's time goes into building geometry for the chunks in view and drawing it, so the cost grows with
-`renderDistance`. Values up to 32 are accepted, but expect roughly 4× the work of 16. Resolution matters much less:
-going from 720p to 1080p made a render about 6% slower.
+`renderDistance`. Values up to 32 are accepted, but expect roughly 4× the work of 16.
+
+## Resolution
+
+`width` and `height` go up to 7680×4320 (8K). The default is 1920×1080. Loading chunks, building geometry and reading
+distant terrain cost the same at any size. Drawing the frame and shading grow with the number of pixels, and
+`ssaa: 2` draws twice the width and height internally.
+
+From the [render benchmark](development.md#render-benchmark) with `-PbenchWidth=3840 -PbenchHeight=2160`, on
+2 cores with a 3 GB heap, two rounds each, against the same run at 1080p:
+
+| Shader | Village 1080p | Village 4K | Peaks 1080p | Peaks 4K |
+|---|---|---|---|---|
+| `none` | 28–37 s | 42–50 s | 25.5–27 s | 49–52 s |
+| `simple` | 21–23 s | 41.5–43 s | 20–22 s | 46–48 s |
+| `realistic` | 41–42 s | 117–120 s | 31–33 s | 98.5–99.5 s |
+
+- All twelve renders took 808 s at 4K against 350 s at 1080p, and 192 s of render-thread CPU against 70 s. Drawing
+  went from 80 s to 226 s and shading from 111 s to 433 s.
+- **Memory:** at 1080p the heap peaked at 1.6 GB. At 4K the realistic renders filled the 3 GB heap and caused one
+  full garbage collection of 0.3 s, so the worst second had 13 TPS instead of 18–20. Give a server that renders 4K
+  with the realistic shader at least 4 GB of heap.
+- **Picture size:** a 4K JPEG was 2–3.8 MB, against 0.5–1.1 MB at 1080p, well within Discord's 10 MB limit.
+
+8K is for big servers. One round at 7680×4320 with a 14 GB heap took 115–193 s per render without a shader or with
+`simple`, and 404–449 s with `realistic`: 1471 s in all, 1.8× the 4K run. The heap peaked at 8 GB. One garbage
+collection during a realistic render paused the server for 2.2 s, and that render's longest tick took 4.2 s. The
+JPEGs were 5.8–7.8 MB, close to Discord's limit, so a busier scene may be sent at lower quality.
