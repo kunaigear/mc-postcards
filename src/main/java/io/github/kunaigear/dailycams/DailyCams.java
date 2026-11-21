@@ -4,6 +4,7 @@ import io.github.kunaigear.dailycams.camera.CameraSpec;
 import io.github.kunaigear.dailycams.camera.CameraStore;
 import io.github.kunaigear.dailycams.command.CameraCommands;
 import io.github.kunaigear.dailycams.config.DailyCamsConfig;
+import io.github.kunaigear.dailycams.render.LodCache;
 import io.github.kunaigear.dailycams.render.RenderQueue;
 import io.github.kunaigear.dailycams.schedule.DailyScheduler;
 import net.fabricmc.api.ModInitializer;
@@ -51,6 +52,7 @@ public final class DailyCams implements ModInitializer {
     private static final long TICK_GAP_NANOS = 80_000_000;
     /** After the server struggled, background work stays paused this long. */
     private static final long BUSY_COOLDOWN_NANOS = 1_000_000_000;
+    private static final long MEGABYTE = 1024 * 1024;
 
     private Path dir;
     private TicketType ticketType;
@@ -81,6 +83,7 @@ public final class DailyCams implements ModInitializer {
                 new TicketType(TicketType.NO_TIMEOUT, TicketType.FLAG_LOADING));
 
         config = DailyCamsConfig.load(dir.resolve("config.json"), null, new ArrayList<>());
+        LodCache.resize(config.lodCacheMegabytes * MEGABYTE);
         cameras = new CameraStore(dir.resolve("cameras.json"));
         cameras.load(new ArrayList<>());
         scheduler = new DailyScheduler(dir.resolve("state.json"));
@@ -110,6 +113,7 @@ public final class DailyCams implements ModInitializer {
             clock = null;
             if (queue != null) queue.shutdown();
             queue = null;
+            LodCache.clear();
         });
         ServerTickEvents.START_SERVER_TICK.register(server -> {
             previousTickStartNanos = tickStartNanos;
@@ -206,6 +210,7 @@ public final class DailyCams implements ModInitializer {
     public List<String> reload() {
         List<String> problems = new ArrayList<>();
         config = DailyCamsConfig.load(dir.resolve("config.json"), config, problems);
+        LodCache.resize(config.lodCacheMegabytes * MEGABYTE);
         cameras.load(problems);
         scheduler.load(config);
         return problems;

@@ -45,7 +45,7 @@ final class LodTerrain {
     private static final long MAX_READ_NANOS = 300_000_000_000L;
 
     final int minX, minZ, sizeX, sizeZ, minCx, minCz, chunksX, chunksZ;
-    private final int minY, minSection;
+    private final int minY;
     /** Y of the highest non-air block of each column, or UNKNOWN. */
     final short[] height;
     private final short[][] maxHeight = new short[MAX_LEVEL + 1][];
@@ -72,7 +72,6 @@ final class LodTerrain {
         this.sizeX = chunksX * 16;
         this.sizeZ = chunksZ * 16;
         this.minY = level.getMinY();
-        this.minSection = level.getMinSectionY();
         height = new short[sizeX * sizeZ];
         Arrays.fill(height, UNKNOWN);
         int n = chunksX * chunksZ;
@@ -123,40 +122,55 @@ final class LodTerrain {
         ChunkMapInvoker storage = (ChunkMapInvoker) level.getChunkSource().chunkMap;
         Deque<CompletableFuture<Optional<CompoundTag>>> inFlight = new ArrayDeque<>();
         Deque<ChunkPos> inFlightPos = new ArrayDeque<>();
-        int next = 0;
+        int next = 0, cached = 0;
         long lastRequest = 0;
-        while (next < wanted.size() || !inFlight.isEmpty()) {
-            long now = System.nanoTime();
-            if (next < wanted.size() && now - start > MAX_READ_NANOS) {
-                DailyCams.LOGGER.warn("LOD: reading distant terrain took over {} s; using the {} of {} chunks read so far",
-                        MAX_READ_NANOS / 1_000_000_000L, next, wanted.size());
-                next = wanted.size();
+        try {
+            while (next < wanted.size() || !inFlight.isEmpty()) {
+                long now = System.nanoTime();
+                if (next < wanted.size() && now - start > MAX_READ_NANOS) {
+                    DailyCams.LOGGER.warn("LOD: reading distant terrain took over {} s; using the {} of {} chunks read so far",
+                            MAX_READ_NANOS / 1_000_000_000L, next, wanted.size());
+                    next = wanted.size();
+                }
+                while (next < wanted.size() && inFlight.size() < IN_FLIGHT) {
+                    Column column = LodCache.get(level, wanted.get(next));
+                    if (column != null) {
+                        if (column != Column.NONE) lod.add(wanted.get(next), column);
+                        next++;
+                        cached++;
+                        continue;
+                    }
+                    // Don't compete with the server's own chunk IO, but keep trickling while it's busy.
+                    if (DailyCams.serverBusy() && now - lastRequest < BUSY_READ_NANOS) break;
+                    ChunkPos p = wanted.get(next++);
+                    LodCache.reading(level, p);
+                    inFlight.add(storage.dailycams$readChunk(p));
+                    inFlightPos.add(p);
+                    lastRequest = now;
+                }
+                if (inFlight.isEmpty()) {
+                    if (next < wanted.size()) sleep(50);
+                    continue;
+                }
+                CompletableFuture<Optional<CompoundTag>> f = inFlight.poll();
+                ChunkPos p = inFlightPos.poll();
+                Column column = null;
+                try {
+                    Optional<CompoundTag> tag = f.join();
+                    column = tag.map(t -> Column.parse(level, t)).orElse(Column.NONE);
+                } catch (Exception e) {
+                    // A chunk that can't be read or parsed is simply left out (and read again next time).
+                }
+                LodCache.read(level, p, column);
+                if (column != null && column != Column.NONE) lod.add(p, column);
+                Throttle.checkpoint();
             }
-            while (next < wanted.size() && inFlight.size() < IN_FLIGHT) {
-                // Don't compete with the server's own chunk IO, but keep trickling while it's busy.
-                if (DailyCams.serverBusy() && now - lastRequest < BUSY_READ_NANOS) break;
-                ChunkPos p = wanted.get(next++);
-                inFlight.add(storage.dailycams$readChunk(p));
-                inFlightPos.add(p);
-                lastRequest = now;
-            }
-            if (inFlight.isEmpty()) {
-                sleep(50);
-                continue;
-            }
-            CompletableFuture<Optional<CompoundTag>> f = inFlight.poll();
-            ChunkPos p = inFlightPos.poll();
-            try {
-                Optional<CompoundTag> tag = f.join();
-                if (tag.isPresent()) lod.add(p, tag.get());
-            } catch (Exception e) {
-                // A chunk that can't be read or parsed is simply left out.
-            }
-            Throttle.checkpoint();
+        } finally {
+            for (ChunkPos p : inFlightPos) LodCache.read(level, p, null);
         }
         lod.buildPyramid();
-        DailyCams.LOGGER.info("LOD: read {} of {} chunks for distant terrain in {} ms", lod.chunks, wanted.size(),
-                (System.nanoTime() - start) / 1_000_000);
+        DailyCams.LOGGER.info("LOD: {} of {} chunks for distant terrain ({} from the cache) in {} ms", lod.chunks, wanted.size(),
+                cached, (System.nanoTime() - start) / 1_000_000);
         return lod.chunks > 0 ? lod : null;
     }
 
@@ -178,44 +192,66 @@ final class LodTerrain {
         }
     }
 
-    private void add(ChunkPos pos, CompoundTag tag) {
-        SerializableChunkData data = SerializableChunkData.parse(level, level.palettedContainerFactory(), tag);
-        if (!data.chunkStatus().isOrAfter(ChunkStatus.FULL)) return; // still being generated: no proper surface yet
-        long[] top = data.heightmaps().get(Heightmap.Types.WORLD_SURFACE);
-        long[] floor = data.heightmaps().get(Heightmap.Types.OCEAN_FLOOR);
-        if (top == null) return;
-        int bits = Mth.ceillog2(level.getHeight() + 1);
-        SimpleBitStorage topStorage = new SimpleBitStorage(bits, 256, top);
-        SimpleBitStorage floorStorage = floor != null ? new SimpleBitStorage(bits, 256, floor) : null;
-        int lowY = Integer.MAX_VALUE, highY = Integer.MIN_VALUE;
-        int ci = (pos.x() - minCx) + (pos.z() - minCz) * chunksX;
-        for (int z = 0; z < 16; z++) {
-            for (int x = 0; x < 16; x++) {
-                int t = topStorage.get(x + z * 16) - 1 + minY;
-                int f = floorStorage != null ? floorStorage.get(x + z * 16) - 1 + minY : t - 16;
+    /**
+     * What distant terrain keeps of a saved chunk: the height of each column (or {@link #UNKNOWN}), and the sections
+     * from a little below the lowest ground up to the highest block, with their light. Never modified once parsed.
+     */
+    record Column(short[] heights, int top, int lowSection, LevelChunkSection[] sections, DataLayer[] skyLight,
+                  DataLayer[] blockLight, long bytes) {
+        /** A chunk that isn't saved, has no surface yet (it's still being generated) or no blocks at all. */
+        static final Column NONE = new Column(new short[0], 0, 0, new LevelChunkSection[0], new DataLayer[0], new DataLayer[0], 64);
+
+        static Column parse(ServerLevel level, CompoundTag tag) {
+            SerializableChunkData data = SerializableChunkData.parse(level, level.palettedContainerFactory(), tag);
+            if (!data.chunkStatus().isOrAfter(ChunkStatus.FULL)) return NONE;
+            long[] top = data.heightmaps().get(Heightmap.Types.WORLD_SURFACE);
+            long[] floor = data.heightmaps().get(Heightmap.Types.OCEAN_FLOOR);
+            if (top == null) return NONE;
+            int minY = level.getMinY();
+            int bits = Mth.ceillog2(level.getHeight() + 1);
+            SimpleBitStorage topStorage = new SimpleBitStorage(bits, 256, top);
+            SimpleBitStorage floorStorage = floor != null ? new SimpleBitStorage(bits, 256, floor) : null;
+            short[] heights = new short[256];
+            Arrays.fill(heights, UNKNOWN);
+            int lowY = Integer.MAX_VALUE, highY = Integer.MIN_VALUE;
+            for (int i = 0; i < 256; i++) {
+                int t = topStorage.get(i) - 1 + minY;
+                int f = floorStorage != null ? floorStorage.get(i) - 1 + minY : t - 16;
                 if (t < minY) continue;
-                height[(pos.getMinBlockZ() + z - minZ) * sizeX + (pos.getMinBlockX() + x - minX)] = (short) t;
+                heights[i] = (short) t;
                 highY = Math.max(highY, t);
                 lowY = Math.min(lowY, Math.min(t, f) - 6);
             }
+            if (highY == Integer.MIN_VALUE) return NONE;
+            int low = Math.max(level.getMinSectionY(), lowY >> 4), high = (highY >> 4);
+            LevelChunkSection[] keep = new LevelChunkSection[high - low + 1];
+            DataLayer[] sky = new DataLayer[keep.length], blk = new DataLayer[keep.length];
+            // Roughly what this takes in memory, for the cache's size limit.
+            long bytes = 256 * 2 + 3 * 16L * keep.length + 128;
+            for (SerializableChunkData.SectionData s : data.sectionData()) {
+                int i = s.y() - low;
+                if (i < 0 || i >= keep.length) continue;
+                keep[i] = s.chunkSection();
+                sky[i] = s.skyLight();
+                blk[i] = s.blockLight();
+                if (keep[i] != null) bytes += keep[i].getSerializedSize() + 64;
+                if (sky[i] != null && !sky[i].isEmpty()) bytes += DataLayer.SIZE + 16;
+                if (blk[i] != null && !blk[i].isEmpty()) bytes += DataLayer.SIZE + 16;
+            }
+            return new Column(heights, highY, low, keep, sky, blk, bytes);
         }
-        if (highY == Integer.MIN_VALUE) return;
-        maxTop = Math.max(maxTop, highY);
-        // Keep the sections from a little below the lowest ground up to the highest block.
-        int low = Math.max(minSection, lowY >> 4), high = (highY >> 4);
-        LevelChunkSection[] keep = new LevelChunkSection[high - low + 1];
-        DataLayer[] sky = new DataLayer[keep.length], blk = new DataLayer[keep.length];
-        for (SerializableChunkData.SectionData s : data.sectionData()) {
-            int i = s.y() - low;
-            if (i < 0 || i >= keep.length) continue;
-            keep[i] = s.chunkSection();
-            sky[i] = s.skyLight();
-            blk[i] = s.blockLight();
+    }
+
+    private void add(ChunkPos pos, Column column) {
+        int ci = (pos.x() - minCx) + (pos.z() - minCz) * chunksX;
+        for (int z = 0; z < 16; z++) {
+            System.arraycopy(column.heights, z * 16, height, (pos.getMinBlockZ() + z - minZ) * sizeX + (pos.getMinBlockX() - minX), 16);
         }
-        sections[ci] = keep;
-        skyLight[ci] = sky;
-        blockLight[ci] = blk;
-        lowSection[ci] = low;
+        maxTop = Math.max(maxTop, column.top);
+        sections[ci] = column.sections;
+        skyLight[ci] = column.skyLight;
+        blockLight[ci] = column.blockLight;
+        lowSection[ci] = column.lowSection;
         chunks++;
     }
 

@@ -63,6 +63,12 @@ public final class DailyCamsConfig {
     }
 
     /**
+     * Memory for keeping distant terrain between renders, in MB, so cameras near each other (and the same camera
+     * the next day) don't read the same chunks from disk again. 0 = off.
+     */
+    public int lodCacheMegabytes = 256;
+
+    /**
      * "simple" (sun shadows, warm light, haze, bloom, colour grade), "realistic" (relit from scratch: physical sky,
      * soft shadows, water reflections, filmic tone mapping) or "none" (plain Camera Obscura output).
      */
@@ -185,6 +191,7 @@ public final class DailyCamsConfig {
         ssaa = Mth.clamp(ssaa, 1, 4);
         lodDistance = lodDistance <= 0 ? 0 : Mth.clamp(lodDistance, renderDistance + 1, 128);
         renderCpuShare = Mth.clamp(renderCpuShare, 0.05, 1.0);
+        lodCacheMegabytes = Mth.clamp(lodCacheMegabytes, 0, 65536);
         jpegQuality = Mth.clamp(jpegQuality, 0.1f, 1f);
         namedCameraLimit = Math.max(0, namedCameraLimit);
         testCooldownSeconds = Math.max(0, testCooldownSeconds);

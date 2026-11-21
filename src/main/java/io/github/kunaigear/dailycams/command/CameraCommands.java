@@ -7,6 +7,7 @@ import io.github.kunaigear.dailycams.DailyCams;
 import io.github.kunaigear.dailycams.camera.CameraSpec;
 import io.github.kunaigear.dailycams.camera.CameraStore;
 import io.github.kunaigear.dailycams.config.DailyCamsConfig;
+import io.github.kunaigear.dailycams.render.LodCache;
 import io.github.kunaigear.dailycams.render.RenderQueue;
 import io.github.kunaigear.dailycams.webhook.WebhookSender;
 import com.mojang.brigadier.CommandDispatcher;
@@ -461,6 +462,12 @@ public final class CameraCommands {
                 .append(Component.literal("\n  Cameras: " + mod.cameras().all().size()))
                 .append(Component.literal("\n  Queue: " + (queue == null ? 0 : queue.size())
                         + (active != null ? " (now: '" + active + "')" : "")));
+        if (isAdmin(src)) {
+            long[] cache = LodCache.usage();
+            out.append(Component.literal(cache[2] == 0 ? "\n  Distant terrain cache: off"
+                    : String.format(Locale.ROOT, "\n  Distant terrain cache: %d chunks, %d of %d MB",
+                    cache[0], cache[1] >> 20, cache[2] >> 20)));
+        }
         ServerPlayer player = src.getPlayer();
         if (player != null) {
             out.append(Component.literal("\n  You: " + (mod.cameras().personalOf(player.getUUID()) != null ? "personal camera set" : "no camera yet")

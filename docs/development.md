@@ -89,7 +89,7 @@ Under `src/main/java/io/github/kunaigear/dailycams/`:
 | `render/` | The render queue, chunk loading, the bridge to Camera Obscura, the throttle and the shader. |
 | `schedule/` | The daily schedule. |
 | `webhook/` | The Discord and generic webhook upload. |
-| `mixin/` | Hooks into Camera Obscura (mesh pinning, invokers, draw throttle) and the server (keep awake while rendering). |
+| `mixin/` | Hooks into Camera Obscura (mesh pinning, invokers, draw throttle, Polymer lookups) and the server (keep awake while rendering, chunk saves for the distant terrain cache). |
 
 ## Releasing
 

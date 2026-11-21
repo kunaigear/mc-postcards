@@ -56,18 +56,21 @@ than 100 ms late (two missed ticks), which players can notice.
 ### Shaders
 
 The same host and mobs, with the default settings (distant terrain out to 64 chunks, 1080p JPEG), rendering the
-village from [the documentation pictures](development.md#documentation-pictures) twice with each shader, over
-terrain that was already generated:
+village from [the documentation pictures](development.md#documentation-pictures) four times with each shader, over
+terrain that was already generated. Half of the renders started with an empty
+[distant terrain cache](distant-terrain.md#cache), the other half found the chunks of the render before in it:
 
-| Shader | Time per camera | Of that, shading | Hitches | Worst second | Longest GC pause |
-|---|---|---|---|---|---|
-| `none` | 121–123 s | 1 s | 0 | 20 TPS | 55 ms |
-| `simple` | 128–129 s | 8–9 s | 0 | 20 TPS | 63 ms |
-| `realistic` | 149–152 s | 25–26 s | 0 | 20 TPS | 58 ms |
+| Shader | Time per camera | With the distant terrain cached | Of that, shading | Worst second |
+|---|---|---|---|---|
+| `none` | 41–45 s | 32–34 s | 1–1.5 s | 18–20 TPS |
+| `simple` | 43–45 s | 34–35 s | 2.5 s | 19–20 TPS |
+| `realistic` | 63–68 s | 54–55 s | 18–21 s | 18–20 TPS |
 
-The realistic shader also takes about 4 s longer to draw the frame, for the leaves that stick out of their blocks.
-Most of the time goes into building geometry for the chunks in view: about 103 s with every shader. The idle
-server had no hitches either on this machine.
+Building geometry for the chunks in view takes 15–18 s, drawing the frame 15–19 s (the realistic shader's leaves,
+which stick out of their blocks, add about 4 s), and reading the distant terrain about 10 s from disk or 1 s from the
+cache. There was about one hitch per render, each from a garbage collection pause of 55–105 ms: the render makes as
+much garbage as it always did, but in less time, so the collector has more to copy at once. The idle server had no
+hitches.
 
 ## Render distance
 
@@ -76,6 +79,6 @@ around a scene instead of a wall of fog:
 
 ![6 chunks vs 16 chunks](images/render-distance.jpg)
 
-Most of a render's time goes into building geometry for the chunks in view, so the cost grows with
+Most of a render's time goes into building geometry for the chunks in view and drawing it, so the cost grows with
 `renderDistance`. Values up to 32 are accepted, but expect roughly 4× the work of 16. Resolution matters much less:
 going from 720p to 1080p made a render about 6% slower.

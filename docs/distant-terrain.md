@@ -35,18 +35,31 @@ since that would cost the server as much as a player exploring it.
 
 Distant terrain is off in dimensions with a roof (the Nether).
 
-## Setting
+## Settings
 
 | Key | Default | Effect |
 |---|---|---|
 | `lodDistance` | `64` | How far distant terrain reaches, in chunks (17–128, must be more than `renderDistance`). `0` turns it off. |
+| `lodCacheMegabytes` | `256` | Memory for keeping distant terrain between renders (0–65536). `0` turns the [cache](#cache) off. |
 
-Run `/dailycam reload` after changing it.
+Run `/dailycam reload` after changing them.
+
+## Cache
+
+Cameras near each other see mostly the same distant chunks, and so does a camera from one day to the next. Daily
+Cams keeps the chunks it has read in memory, up to `lodCacheMegabytes`, and only reads a chunk from disk again once
+it has changed: whenever the server saves a chunk, it's dropped from the cache. When the cache is full, the chunks
+used longest ago make room.
+
+A saved chunk takes about 10 KB, so one camera's distant terrain at the default 64 chunks takes up to about 45 MB.
+For the cache to help from one day to the next, it needs room for every area with cameras; a smaller cache still
+helps the cameras rendered after a nearby one. Admins see how full it is in `/dailycam status`. It's emptied when
+the server stops.
 
 ## Cost
 
-Reading the saved chunks takes a few seconds per camera: on the 2-core test host, about 6 s for about 4,300 chunks
-at the default 64 chunks. Reads go through the server's own chunk storage, a few at a time, and pause while the
+Reading the saved chunks takes a few seconds per camera: on the 2-core test host, about 10 s for about 4,600 chunks
+at the default 64 chunks, or about 1 s when they're in the [cache](#cache). Reads go through the server's own chunk storage, a few at a time, and pause while the
 server is busy. Drawing the distant blocks adds a few more seconds to the shader. In that test, TPS stayed at 20,
 the longest server tick while reading or shading was 12 ms, and memory use didn't change noticeably. Twice the
 distance means roughly four times as many chunks to read.
