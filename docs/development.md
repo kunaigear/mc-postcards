@@ -23,6 +23,7 @@ This builds two jars in `build/libs/`:
 | `./gradlew runServer` | A development server in `run/` with Daily Cams, Camera Obscura and Polymer. |
 | `./gradlew runDevtestServer` | The same server plus a dev-only test mod (`src/devtest`). |
 | `./gradlew runDevtestServer -PsmallServer` | The same again, emulating a 2-core host with a 3 GB heap and a GC log (`run/gc.log`). |
+| `./gradlew runBenchmark` | The [render benchmark](#render-benchmark): its own server and world, renders a fixed scene, reports and stops. |
 | `./gradlew devtestJar` | The test mod as a jar, to try it on a production server next to other mods. |
 
 The test mod is never part of the release jar. It adds:
@@ -33,6 +34,58 @@ The test mod is never part of the release jar. It adds:
   previous tick, and what the renderer was doing (`idle`, `loading`, `building`, `drawing` or `shading`).
 - **`dcgen <x> <z> <yaw> <radius>`** (console): generates the chunks in a 140° wedge in front of a point, out to
   `radius` chunks, so [distant terrain](distant-terrain.md) has something to show on a fresh world.
+
+## Render benchmark
+
+```
+./gradlew runBenchmark
+```
+
+This starts a test server in `run/benchmark/` with its own world (seed `12345`), never `run/world`. It renders
+the village and peaks cameras from [the documentation pictures](#documentation-pictures) with each shader, one after
+another, and then stops. A pen of cows in force-loaded chunks keeps the server busy the whole time, like players
+would. The first run generates the land in front of the cameras, which takes several minutes. Later runs reuse the
+world; delete `run/benchmark/world` to start over.
+
+The report is printed at the end and saved in `run/benchmark/reports/`. It has one row per render, after a row for
+30 s of the idle server to compare against:
+
+| Column | Meaning |
+|---|---|
+| time | From queueing the render until the picture was saved. |
+| hitches | Ticks that started more than 100 ms after the one before, which players can notice. |
+| worst s TPS | Ticks in the slowest full second. |
+| longest tick | The slowest tick, in ms. |
+| GC pauses | Count, longest and total, in ms. |
+| loading, building, drawing, lod, shading | Time in each render stage. Encoding counts as shading. |
+
+Every run uses the same scene and settings, with the build's default config minus the daily schedule, at noon in
+clear weather. Compare runs on the same machine and limits. The distant-terrain cache starts empty, so the first
+render of each camera reads the distant terrain from disk and the other two shaders read it from memory.
+
+| Property | Default | What it does |
+|---|---|---|
+| `-PbenchCores=<n>` | 2 | CPU cores the JVM uses (`-XX:ActiveProcessorCount`). |
+| `-PbenchHeap=<size>` | `3G` | Maximum heap (`-Xmx`). |
+| `-PbenchMobs=<n>` | 200 | Cows in the pen. |
+| `-PbenchMaxHitches=<n>` | off | Fail if the renders together have more hitches than this. |
+| `-PbenchMinTps=<n>` | off | Fail if any full second during a render has fewer ticks than this. |
+| `-PbenchLabel=<text>` | – | Shown in the report and its file name. |
+
+When a budget is broken, the task fails with the reason. `-XX:ActiveProcessorCount` only tells the JVM how many
+threads to plan for; the server can still use every core of the machine. To really take CPU time away, run it in a
+cgroup with a CPU quota and the matching core count:
+
+```
+systemd-run --user --scope -p CPUQuota=100% ./gradlew --no-daemon runBenchmark -PbenchCores=1
+```
+
+Without `--no-daemon`, a Gradle daemon that is already running would start the server outside the quota. The report
+shows the quota it ran under. With one core, the JVM picks the Serial garbage collector instead of G1, like on a real
+one-core host.
+
+The server keeps its GC log in `run/benchmark/gc.log` (replaced on every run) and allows deep JFR stacks, so a
+profile can be taken while it runs: `jcmd <pid> JFR.start settings=profile filename=render.jfr`.
 
 ## Documentation pictures
 
