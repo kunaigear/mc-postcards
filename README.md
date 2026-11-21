@@ -1,9 +1,9 @@
-# Daily Cams
+# Postcards
 
 **A daily photo of your Minecraft world, posted to Discord.** Players place virtual cameras with
-`/dailycam set`. Every day the server renders what each camera sees and sends the picture to a webhook.
+`/postcard set`. Every day the server renders what each camera sees and sends the picture to a webhook.
 
-![A village by the water, rendered by Daily Cams](docs/images/village.jpg)
+![A village by the water, rendered by Postcards](docs/images/village.jpg)
 
 - **Server-side only:** no bot account joins and players don't need any mods. Vanilla clients work.
   An optional client helper places cameras with [Freecam and the player's own FOV](docs/usage.md#client-helper-freecam-and-your-field-of-view).
@@ -22,7 +22,7 @@
 
 ## Quick start
 
-1. Download `daily-cams-<version>.jar` from the [releases](https://github.com/kunaigear/mc-postcards/releases)
+1. Download `postcards-<version>.jar` from the [releases](https://github.com/kunaigear/mc-postcards/releases)
    and put it in your server's `mods/` folder together with:
 
    | Mod | Version |
@@ -31,10 +31,10 @@
    | [Polymer](https://modrinth.com/mod/polymer) | 0.18.x+26.3 |
 
    You need Minecraft 26.3, Fabric Loader 0.19.5 or newer, and Java 25.
-2. Start the server once. It creates `config/dailycams/config.json`.
+2. Start the server once. It creates `config/postcards/config.json`.
 3. [Create a Discord webhook](docs/configuration.md#discord-webhook), put its URL in `webhookUrl`, and run
-   `/dailycam reload`.
-4. In game, look at something nice and run `/dailycam set`. Click **[Preview now]** to get the first picture
+   `/postcard reload`.
+4. In game, look at something nice and run `/postcard set`. Click **[Preview now]** to get the first picture
    straight away. After that, one arrives every day at 12:00 (configurable).
 
 ## Documentation
@@ -54,10 +54,10 @@
 - **Pictures show what the renderer can read:** vanilla models and textures, lighting, fog, sky and clouds.
   Modded blocks appear only if their models are in Polymer's resource pack.
 - **Webhook URLs are secrets.** Commands only show a shortened form. Anyone who can read
-  `config/dailycams/` can see the full URLs.
+  `config/postcards/` can see the full URLs.
 
 ## License
 
-Daily Cams' own code is [MIT](LICENSE). The renderer in `src/main/java/io/github/kunaigear/dailycams/obscura/` is a
+Postcards' own code is [MIT](LICENSE). The renderer in `src/main/java/io/github/kunaigear/postcards/obscura/` is a
 modified copy of [Camera Obscura](https://github.com/tomalbrc/camera-obscura) by tomalbrc, licensed under the
 [AGPL-3.0](LICENSE-AGPL), so the server mod's jar as a whole is under the AGPL-3.0. The client helper is MIT.

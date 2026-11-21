@@ -1,0 +1,47 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read Java version from Gradle
+        run: echo "JAVA_VERSION=$(grep '^java_version' gradle.properties | cut -d'=' -f2)" >> "$GITHUB_ENV"
+
+      # Loom needs Gradle itself to run on this version.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      # A tag that disagrees with mod_version would publish a jar under the wrong name.
+      - name: Check tag matches mod version
+        run: |
+          mod_version="$(grep '^mod_version' gradle.properties | cut -d'=' -f2)"
+          if [ "$GITHUB_REF_NAME" != "v$mod_version" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match mod_version $mod_version" >&2
+            exit 1
+          fi
+
+      - name: Build Fabric mod
+        run: chmod +x ./gradlew && ./gradlew build --no-daemon
+
+      - name: Collect release files
+        run: |
+          mkdir -p release
+          find build/libs -maxdepth 1 -type f -name '*.jar' ! -name '*-sources.jar' ! -name '*-devtest-*' -exec cp {} release/ \;
+          (cd release && sha256sum *.jar > SHA256_CHECKSUM.txt)
+          cat release/SHA256_CHECKSUM.txt
+
+      # CHANGELOG.md is the release text.
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/* --title "$GITHUB_REF_NAME" --notes-file CHANGELOG.md --verify-tag

@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "dailycams-devtest",
+  "id": "postcards-devtest",
   "version": "0.0.0",
-  "name": "Daily Cams dev test",
+  "name": "Postcards dev test",
   "environment": "*",
-  "entrypoints": { "main": ["io.github.kunaigear.dailycams.devtest.DevTest"] },
-  "depends": { "dailycams": "*" }
+  "entrypoints": { "main": ["io.github.kunaigear.postcards.devtest.DevTest"] },
+  "depends": { "postcards": "*" }
 }

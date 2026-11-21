@@ -1,0 +1,17 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "io.github.kunaigear.postcards.mixin",
+  "mixins": [
+    "ChunkMapInvoker",
+    "ChunkMapMixin",
+    "LivingEntityMixin",
+    "WardenMixin"
+  ],
+  "server": [
+    "DedicatedServerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -1,16 +1,21 @@
 {
   "schemaVersion": 1,
-  "id": "dailycams",
+  "id": "postcards",
   "version": "${version}",
-  "name": "Daily Cams",
-  "description": "Players place virtual cameras with /dailycam set. Every day the server renders what each camera sees and posts the picture to a webhook.",
+  "name": "Postcards",
+  "description": "Players place virtual cameras with /postcard set. Every day the server renders what each camera sees and posts the picture to a webhook.",
   "authors": ["kunaigear"],
   "license": ["MIT", "AGPL-3.0-only"],
+  "contact": {
+    "homepage": "https://github.com/kunaigear/mc-postcards",
+    "sources": "https://github.com/kunaigear/mc-postcards",
+    "issues": "https://github.com/kunaigear/mc-postcards/issues"
+  },
   "environment": "*",
   "entrypoints": {
-    "main": ["io.github.kunaigear.dailycams.DailyCams"]
+    "main": ["io.github.kunaigear.postcards.Postcards"]
   },
-  "mixins": ["dailycams.mixins.json"],
+  "mixins": ["postcards.mixins.json"],
   "depends": {
     "fabricloader": ">=0.19.5",
     "fabric-api": "*",

@@ -2,7 +2,7 @@
 
 [← Back to the README](../README.md)
 
-Beyond the normal render distance (16 chunks), Daily Cams keeps drawing the world's real blocks, the way Voxy does
+Beyond the normal render distance (16 chunks), Postcards keeps drawing the world's real blocks, the way Voxy does
 in game. By default it reaches 64 chunks (1024 blocks).
 
 ![The same camera without (left) and with (right) distant terrain](images/lod-comparison.jpg)
@@ -30,7 +30,7 @@ It works the way Voxy does, on the server:
 
 ![Distant terrain up close: stone, snow and spruce forests beyond the full-detail cliff](images/lod-detail.jpg)
 
-Only explored terrain appears: terrain that was never generated stays sky or haze. Daily Cams doesn't generate it,
+Only explored terrain appears: terrain that was never generated stays sky or haze. Postcards doesn't generate it,
 since that would cost the server as much as a player exploring it.
 
 Distant terrain is off in dimensions with a roof (the Nether).
@@ -42,7 +42,7 @@ Distant terrain is off in dimensions with a roof (the Nether).
 | `lodDistance` | `64` | How far distant terrain reaches, in chunks (17–128, must be more than `renderDistance`). `0` turns it off. |
 | `lodCacheMegabytes` | `256` | Memory for keeping distant terrain between renders (0–65536). `0` turns the [cache](#cache) off. |
 
-Run `/dailycam reload` after changing them.
+Run `/postcard reload` after changing them.
 
 ## Cache
 
@@ -53,7 +53,7 @@ used longest ago make room.
 
 A saved chunk takes about 10 KB, so one camera's distant terrain at the default 64 chunks takes up to about 45 MB.
 For the cache to help from one day to the next, it needs room for every area with cameras; a smaller cache still
-helps the cameras rendered after a nearby one. Admins see how full it is in `/dailycam status`. It's emptied when
+helps the cameras rendered after a nearby one. Admins see how full it is in `/postcard status`. It's emptied when
 the server stops.
 
 ## Cost

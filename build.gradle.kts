@@ -8,7 +8,7 @@ version = "${p("mod_version")}+${p("minecraft_version")}"
 group = p("maven_group")
 
 base {
-    archivesName = "daily-cams"
+    archivesName = "postcards"
 }
 
 repositories {
@@ -59,7 +59,7 @@ tasks.jar {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Dev-only test mod: `./gradlew runDevtestServer`, then run `dctest` in the console. It drives the
+// Dev-only test mod: `./gradlew runDevtestServer`, then run `pctest` in the console. It drives the
 // real commands as fake players with different permission levels. Never part of the release jar.
 val devtest: SourceSet by sourceSets.creating {
     compileClasspath += sourceSets.main.get().compileClasspath + sourceSets.main.get().output
@@ -67,7 +67,7 @@ val devtest: SourceSet by sourceSets.creating {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Optional client helper (its own jar): fills in the player's FOV and freecam view for /dailycam set.
+// Optional client helper (its own jar): fills in the player's FOV and freecam view for /postcard set.
 // It doesn't use any of the server mod's code.
 val client: SourceSet by sourceSets.creating {
     compileClasspath += sourceSets.main.get().compileClasspath
@@ -81,7 +81,7 @@ tasks.named<ProcessResources>("processClientResources") {
 }
 
 val clientJar = tasks.register<Jar>("clientJar") {
-    archiveBaseName = "daily-cams-client"
+    archiveBaseName = "postcards-client"
     from(client.output)
     from("LICENSE")
 }
@@ -93,9 +93,9 @@ val benchFreeze = (findProperty("benchFreeze")?.toString() ?: "false") != "false
 
 loom {
     mods {
-        register("dailycams") { sourceSet(sourceSets.main.get()) }
-        register("dailycams-devtest") { sourceSet(devtest) }
-        register("dailycams-client") { sourceSet(client) }
+        register("postcards") { sourceSet(sourceSets.main.get()) }
+        register("postcards-devtest") { sourceSet(devtest) }
+        register("postcards-client") { sourceSet(client) }
     }
     runs {
         register("devtestServer") {
@@ -115,13 +115,13 @@ loom {
             val bench = { key: String, default: String -> findProperty(key)?.toString() ?: default }
             vmArgs("-XX:ActiveProcessorCount=${bench("benchCores", "2")}", "-Xmx${bench("benchHeap", "3G")}",
                    "-Xlog:gc:file=gc.log:uptime,level,tags:filecount=0", "-XX:FlightRecorderOptions:stackdepth=512")
-            property("dailycams.benchmark", "true")
-            property("dailycams.benchmark.mobs", bench("benchMobs", "200"))
-            property("dailycams.benchmark.maxHitches", bench("benchMaxHitches", "-1"))
-            property("dailycams.benchmark.minTps", bench("benchMinTps", "-1"))
-            property("dailycams.benchmark.label", bench("benchLabel", ""))
-            property("dailycams.benchmark.rounds", bench("benchRounds", "1"))
-            property("dailycams.benchmark.freeze", benchFreeze.toString())
+            property("postcards.benchmark", "true")
+            property("postcards.benchmark.mobs", bench("benchMobs", "200"))
+            property("postcards.benchmark.maxHitches", bench("benchMaxHitches", "-1"))
+            property("postcards.benchmark.minTps", bench("benchMinTps", "-1"))
+            property("postcards.benchmark.label", bench("benchLabel", ""))
+            property("postcards.benchmark.rounds", bench("benchRounds", "1"))
+            property("postcards.benchmark.freeze", benchFreeze.toString())
         }
     }
 }
@@ -131,7 +131,7 @@ tasks.matching { it.name == "runBenchmark" }.configureEach {
     val port = findProperty("benchPort")?.toString() ?: "25570"
     val cpuShare = findProperty("benchCpuShare")?.toString()
     doFirst {
-        dir.resolve("config/dailycams").mkdirs()
+        dir.resolve("config/postcards").mkdirs()
         dir.resolve("eula.txt").writeText("eula=true\n")
         val properties = dir.resolve("server.properties")
         if (!properties.exists()) {
@@ -143,7 +143,7 @@ tasks.matching { it.name == "runBenchmark" }.configureEach {
         cpuShare?.let { config += "\"renderCpuShare\": ${it.toDoubleOrNull() ?: throw GradleException("-PbenchCpuShare must be a number, not '$it'")}" }
         // Lossless pictures for comparing pixels, never falling back to JPEG for size.
         if (benchFreeze) config += listOf("\"imageFormat\": \"png\"", "\"maxUploadBytes\": 1000000000")
-        dir.resolve("config/dailycams/config.json").writeText(config.joinToString(", ", "{", "}\n"))
+        dir.resolve("config/postcards/config.json").writeText(config.joinToString(", ", "{", "}\n"))
         dir.resolve("benchmark-result.txt").delete()
     }
     doLast {
@@ -155,6 +155,6 @@ tasks.matching { it.name == "runBenchmark" }.configureEach {
 
 // The dev test mod as a standalone jar, for trying it on a production server next to other mods.
 tasks.register<Jar>("devtestJar") {
-    archiveBaseName = "daily-cams-devtest"
+    archiveBaseName = "postcards-devtest"
     from(devtest.output)
 }
