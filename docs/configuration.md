@@ -48,6 +48,7 @@ Every post is an embed with the picture, the camera name, its coordinates and di
 | `lodDistance` | `64` | How far [distant terrain](distant-terrain.md) reaches, in chunks. `0` turns it off. |
 | `lodCacheMegabytes` | `256` | Memory for keeping distant terrain between renders, so it isn't read from disk again. `0` turns it off. See [Distant terrain](distant-terrain.md#cache). |
 | `ssaa` | `2` | Supersampling factor for smoother edges (1 = off). |
+| `renderEntities` | `true` | Whether mobs, players and other entities appear in pictures. |
 | `shader` | `"simple"` | `simple`, `realistic` or `none`. See [Shaders](shader.md). |
 | `shaderSettings` | | Settings of the simple shader. See [Shaders](shader.md#settings-1). |
 | `realisticSettings` | | Settings of the realistic shader (exposure, night brightness, clouds…). See [Shaders](shader.md#settings). |
@@ -78,6 +79,3 @@ If `config.json` or `cameras.json` has an error, for example a missing comma aft
 loaded. A copy is saved as `<file>.broken-<date>`, and the error is logged and shown by `/dailycam reload`. The
 mod keeps the settings and cameras it had loaded before (or uses the defaults at startup) and never overwrites a
 broken `config.json`.
-
-Daily Cams also uses Camera Obscura's own config (`config/cameraobscura/config.json`) for things like whether
-mobs and players appear in pictures (`renderEntities`).

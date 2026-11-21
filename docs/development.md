@@ -20,7 +20,7 @@ This builds two jars in `build/libs/`:
 
 | Command | What it starts |
 |---|---|
-| `./gradlew runServer` | A development server in `run/` with Daily Cams, Camera Obscura and Polymer. |
+| `./gradlew runServer` | A development server in `run/` with Daily Cams and Polymer. |
 | `./gradlew runDevtestServer` | The same server plus a dev-only test mod (`src/devtest`). |
 | `./gradlew runDevtestServer -PsmallServer` | The same again, emulating a 2-core host with a 3 GB heap and a GC log (`run/gc.log`). |
 | `./gradlew runBenchmark` | The [render benchmark](#render-benchmark): its own server and world, renders a fixed scene, reports and stops. |
@@ -197,10 +197,20 @@ Under `src/main/java/io/github/kunaigear/dailycams/`:
 |---|---|
 | `command/` | The `/dailycam` command and its `/dcam` alias. |
 | `camera/` | The camera model and `cameras.json`. |
-| `render/` | The render queue, chunk loading, the bridge to Camera Obscura, the throttle and the shader. |
+| `render/` | The render queue, chunk loading, the throttle, the shaders and distant terrain. |
+| `obscura/` | The software renderer: a modified copy of [Camera Obscura](https://github.com/tomalbrc/camera-obscura) 2.1.4+26.3, under the AGPL-3.0 (see below). |
 | `schedule/` | The daily schedule. |
 | `webhook/` | The Discord and generic webhook upload. |
-| `mixin/` | Hooks into Camera Obscura (mesh pinning, invokers, draw throttle, Polymer lookups) and the server (keep awake while rendering, chunk saves for the distant terrain cache). |
+| `mixin/` | Hooks into the server: keep it awake while rendering, chunk saves for the distant terrain cache. |
+
+### The renderer
+
+`obscura/` started as Camera Obscura's renderer, with its camera items, video, commands and presets left out.
+Daily Cams' hooks are written into it directly: the throttle, culling and draw order in the pipeline, recording for
+the realistic shader in the rasterizer, and the block, light and model caches in the meshing. Camera Obscura is
+licensed under the AGPL-3.0, so these files keep that license and their notice, and the release jar as a whole is
+under the AGPL-3.0 (`LICENSE-AGPL`). The AGPL asks that players can get the source, so `/dailycam` links to it. The
+rest of Daily Cams stays MIT.
 
 ## Releasing
 
