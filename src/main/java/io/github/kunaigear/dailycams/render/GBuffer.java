@@ -16,10 +16,10 @@ import java.util.Arrays;
  * supersampled block that shows one ({@link #opaqueSample}), so a thin edge isn't lost when the centre sample misses
  * it; translucent surfaces use the centre sample. The frontmost opaque surface and the frontmost translucent one
  * (water, glass) are kept separately.
- * Only active on the render thread while {@link #ACTIVE} is set.
+ * Only active on the render thread while {@link #active} is set.
  */
 public final class GBuffer {
-    private static final ThreadLocal<GBuffer> ACTIVE = new ThreadLocal<>();
+    private static @Nullable GBuffer active;
 
     final int width, height, scale, fbWidth;
     /** Index ({@code row * scale + column} in the framebuffer's orientation) of the centre sample of a block. */
@@ -63,15 +63,15 @@ public final class GBuffer {
     }
 
     public static @Nullable GBuffer active() {
-        return ACTIVE.get();
+        return RenderFlags.rendering() ? active : null;
     }
 
     void activate() {
-        ACTIVE.set(this);
+        active = this;
     }
 
     static void deactivate() {
-        ACTIVE.remove();
+        active = null;
     }
 
     boolean hasOpaque(int i) {

@@ -10,6 +10,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import net.minecraft.server.level.TicketType;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ChunkPos;
@@ -132,16 +133,30 @@ public final class RenderQueue {
         /** Never request more chunks at once than this, so loading/generation can't flood the server. */
         static final int MAX_IN_FLIGHT = 4;
         static final int MAX_NEW_PER_TICK = 2;
+        /**
+         * Saved chunks arrive within a tick or two and cost the server little, so while every chunk in flight is
+         * that quick, more are requested at once. One that takes longer is probably being generated. On a host
+         * short of CPU, reading many chunks at once starves the server thread, so once the server has struggled
+         * {@link #STRUGGLES_ALLOWED} times while a camera's chunks load (a garbage collection pause counts too), the
+         * rest of them load at the lower limits.
+         */
+        static final int MAX_IN_FLIGHT_SAVED = 16;
+        static final int MAX_NEW_PER_TICK_SAVED = 8;
+        static final int SAVED_LOAD_TICKS = 10;
+        static final int STRUGGLES_ALLOWED = 3;
 
         final Request request;
         final ServerLevel level;
         final CameraRenderer.Settings settings;
         final List<ChunkPos> toLoad;
         final List<ChunkPos> ticketed = new ArrayList<>();
-        final List<ChunkPos> pending = new ArrayList<>();
+        /** Requested chunks that haven't loaded yet, with the tick they were requested in. */
+        final Object2IntOpenHashMap<ChunkPos> pending = new Object2IntOpenHashMap<>();
         int nextToLoad;
         int lastProgressTick;
         int lastRequestTick;
+        int struggles;
+        boolean wasBusy;
         Phase phase = Phase.LOADING;
         int settleUntil;
 
@@ -165,17 +180,25 @@ public final class RenderQueue {
             switch (phase) {
                 case LOADING -> {
                     var source = level.getChunkSource();
-                    if (pending.removeIf(p -> source.getChunkNow(p.x(), p.z()) != null)) lastProgressTick = now;
+                    if (pending.keySet().removeIf(p -> source.getChunkNow(p.x(), p.z()) != null)) lastProgressTick = now;
                     // Request chunks a few at a time while the server has time to spare. While it is busy,
                     // still trickle one chunk per second so a permanently loaded server finishes eventually.
                     boolean busy = DailyCams.serverBusy();
-                    int budget = !busy ? MAX_NEW_PER_TICK : (now - lastRequestTick >= 20 ? 1 : 0);
-                    for (int i = 0; i < budget && pending.size() < MAX_IN_FLIGHT && nextToLoad < toLoad.size(); i++) {
+                    if (busy && !wasBusy) struggles++;
+                    wasBusy = busy;
+                    boolean quick = struggles < STRUGGLES_ALLOWED && pending.values().intStream().allMatch(t -> now - t <= SAVED_LOAD_TICKS);
+                    int budget = busy ? (now - lastRequestTick >= 20 ? 1 : 0) : quick ? MAX_NEW_PER_TICK_SAVED : MAX_NEW_PER_TICK;
+                    int maxInFlight = quick ? MAX_IN_FLIGHT_SAVED : MAX_IN_FLIGHT;
+                    while (budget > 0 && pending.size() < maxInFlight && nextToLoad < toLoad.size()) {
                         ChunkPos p = toLoad.get(nextToLoad++);
                         source.addTicketWithRadius(ticketType, p, 0);
                         ticketed.add(p);
-                        lastRequestTick = now;
-                        if (source.getChunkNow(p.x(), p.z()) == null) pending.add(p);
+                        // Chunks that are already loaded cost nothing.
+                        if (source.getChunkNow(p.x(), p.z()) == null) {
+                            pending.put(p, now);
+                            lastRequestTick = now;
+                            budget--;
+                        }
                     }
                     if (nextToLoad >= toLoad.size() && pending.isEmpty()) {
                         phase = Phase.SETTLING;

@@ -36,6 +36,7 @@ import java.util.concurrent.CompletableFuture;
 final class LodTerrain {
     static final short UNKNOWN = Short.MIN_VALUE;
     private static final int MAX_LEVEL = 6;
+    private static final int[] AXIS_X = {1, 0, 0}, AXIS_Y = {0, 1, 0}, AXIS_Z = {0, 0, 1};
     private static final int IN_FLIGHT = 24;
     /** How far a ray follows water downwards before calling it deep. */
     private static final int MAX_WATER_STEPS = 48;
@@ -60,6 +61,9 @@ final class LodTerrain {
     int chunks;
     /** The highest block anywhere in the distant terrain. */
     int maxTop = Integer.MIN_VALUE;
+    /** The corners of the face {@link #ambientOcclusion} looked at last. */
+    private int aoX, aoY, aoZ, aoFace = -1;
+    private double ao00, ao10, ao01, ao11;
 
     private LodTerrain(ServerLevel level, int minCx, int minCz, int chunksX, int chunksZ) {
         this.level = level;
@@ -365,7 +369,7 @@ final class LodTerrain {
                 if ((bx < 0 && dx <= 0) || (bx >= sizeX && dx >= 0) || (bz < 0 && dz <= 0) || (bz >= sizeZ && dz >= 0)) return false;
             }
             int size = 1 << lvl;
-            int cx = Math.floorDiv(bx, size), cz = Math.floorDiv(bz, size);
+            int cx = bx >> lvl, cz = bz >> lvl;
             double cellMinX = minX + (double) cx * size, cellMinZ = minZ + (double) cz * size;
             double tx = dx > 0 ? (cellMinX + size - ox) / dx : dx < 0 ? (cellMinX - ox) / dx : Double.POSITIVE_INFINITY;
             double tz = dz > 0 ? (cellMinZ + size - oz) / dz : dz < 0 ? (cellMinZ - oz) / dz : Double.POSITIVE_INFINITY;
@@ -502,14 +506,20 @@ final class LodTerrain {
      * hit point blends the four corners. 1 = open, down to 0.4.
      */
     double ambientOcclusion(Hit hit) {
-        int[] n = LodBlocks.NORMALS[hit.face];
-        // In-face axes matching (a, b): X faces (z, y), Y faces (x, z), Z faces (x, y).
-        int[] ua = n[0] != 0 ? new int[]{0, 0, 1} : new int[]{1, 0, 0};
-        int[] ub = n[1] != 0 ? new int[]{0, 0, 1} : new int[]{0, 1, 0};
-        double c00 = corner(hit, ua, ub, -1, -1), c10 = corner(hit, ua, ub, 1, -1);
-        double c01 = corner(hit, ua, ub, -1, 1), c11 = corner(hit, ua, ub, 1, 1);
+        // The corners only depend on the face, and the samples of a pixel and its neighbours often hit the same one.
+        if (hit.fx != aoX || hit.fy != aoY || hit.fz != aoZ || hit.face != aoFace) {
+            int[] n = LodBlocks.NORMALS[hit.face];
+            // In-face axes matching (a, b): X faces (z, y), Y faces (x, z), Z faces (x, y).
+            int[] ua = n[0] != 0 ? AXIS_Z : AXIS_X;
+            int[] ub = n[1] != 0 ? AXIS_Z : AXIS_Y;
+            ao00 = corner(hit, ua, ub, -1, -1);
+            ao10 = corner(hit, ua, ub, 1, -1);
+            ao01 = corner(hit, ua, ub, -1, 1);
+            ao11 = corner(hit, ua, ub, 1, 1);
+            aoX = hit.fx; aoY = hit.fy; aoZ = hit.fz; aoFace = hit.face;
+        }
         double a = hit.a, b = hit.b;
-        return (c00 * (1 - a) + c10 * a) * (1 - b) + (c01 * (1 - a) + c11 * a) * b;
+        return (ao00 * (1 - a) + ao10 * a) * (1 - b) + (ao01 * (1 - a) + ao11 * a) * b;
     }
 
     private double corner(Hit hit, int[] ua, int[] ub, int sa, int sb) {
