@@ -37,7 +37,7 @@ permission API, so LuckPerms and similar mods can grant these nodes instead of o
 | `/dailycam set <your name> <x y z> <yaw pitch> [fov]` | everyone | Places your personal camera at an exact position, optionally with a field of view (30–110). `~` works. The dimension is the one you're in, or use `/execute in`. |
 | `/dailycam set <name> [<x y z> <yaw pitch> [fov]]` | elevated | Creates or moves a named camera. |
 | `/dailycam list` | everyone | Lists your cameras, with clickable `[test]` and `[remove]` buttons. Admins see all cameras. |
-| `/dailycam status` | everyone | Shows the next scheduled run, the queue and how many cameras you have. |
+| `/dailycam status` | everyone | Shows the next scheduled run, the queue and how many cameras you have. Admins also see how full the [distant terrain cache](distant-terrain.md#cache) is. |
 | `/dailycam info [name]` | everyone | Shows a camera's details. |
 | `/dailycam test [name]` | owner / admin | Renders and sends a camera right away. Non-admins have a cooldown (5 minutes by default). |
 | `/dailycam remove [name]` | owner / admin | Deletes a camera. |

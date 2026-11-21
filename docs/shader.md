@@ -7,8 +7,8 @@ players don't need anything for them. They're unrelated to Iris shader packs on 
 
 | `"shader"` | Look | Extra time per camera (1080p, 2-core host) |
 |---|---|---|
-| `simple` (default) | Camera Obscura's picture with sun shadows, warm light, haze, bloom and a colour grade. | about 7 s |
-| `realistic` | Relit from scratch, in the style of shader packs like Photon: physical sky, volumetric clouds, soft shadows, sun rays, leaves that glow in the sun, reflections in water, filmic colour. | about 29 s |
+| `simple` (default) | Camera Obscura's picture with sun shadows, warm light, haze, bloom and a colour grade. | about 1 s |
+| `realistic` | Relit from scratch, in the style of shader packs like Photon: physical sky, volumetric clouds, soft shadows, sun rays, leaves that glow in the sun, reflections in water, filmic colour. | about 22 s |
 | `none` | Camera Obscura's plain picture. | – |
 
 Choose one for every camera with `"shader"` in the config, or for one camera with
@@ -87,10 +87,10 @@ The realistic shader is tuned with `realisticSettings`:
 
 ### Cost
 
-On the [2-core test host](performance.md#measurements), with the default CPU limit, a 1080p picture of the village
-took 149–152 s with the realistic shader, against 128–129 s with the simple one and 121–123 s without a shader. The
-shading itself took about 25 s, and the leaves sticking out of their blocks made drawing the frame about 4 s slower.
-TPS stayed at 20 throughout. It needs about 170 MB of extra memory at 1080p, and about 4× that at 4K.
+On the [2-core test host](performance.md#shaders), with the default CPU limit, a 1080p picture of the village
+took 63–68 s with the realistic shader, against 43–45 s with the simple one and 41–45 s without a shader. The
+shading itself took 18–21 s, and the leaves sticking out of their blocks made drawing the frame about 4 s slower.
+TPS stayed at 18–20 in the worst second. It needs about 170 MB of extra memory at 1080p, and about 4× that at 4K.
 
 The realistic shader replaces Camera Obscura's sky, clouds and fog with its own.
 
@@ -128,6 +128,6 @@ The simple shader is tuned with `shaderSettings`:
 
 ### Cost
 
-The simple shader adds about 7 s per 1080p camera on the 2-core test host, less on a faster CPU. It runs in the
+The simple shader adds about 1 s per 1080p camera on the 2-core test host, less on a faster CPU. It runs in the
 background under the same CPU limit as the rest of the render, and in the [2-core test](performance.md#measurements)
 the shading phase caused no hitches.
