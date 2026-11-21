@@ -54,7 +54,7 @@ public final class BushyLeaves {
 
     private static boolean exposed(BlockAndLightGetter level, int x, int y, int z) {
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        for (Direction d : Direction.values()) {
+        for (Direction d : SectionCache.DIRECTIONS) {
             BlockState n = level.getBlockState(pos.set(x + d.getStepX(), y + d.getStepY(), z + d.getStepZ()));
             if (!(n.getBlock() instanceof LeavesBlock) && !n.canOcclude()) return true;
         }

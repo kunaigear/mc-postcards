@@ -6,6 +6,7 @@
     "ChunkMeshCacheMixin",
     "ChunkMeshCacheInvoker",
     "FastBlockGetterInvoker",
+    "FastBlockGetterMixin",
     "ChunkMeshInvoker",
     "ChunkMapInvoker",
     "ChunkMapMixin",

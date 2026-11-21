@@ -76,7 +76,9 @@ final class CameraRenderer {
                         }
                         if (visible && emptyMesh(level, chunks, sx, sy, sz)) visible = false;
                         if (visible) {
+                            SectionCache.begin(mesh.origin());
                             ChunkMeshCacheInvoker.dailycams$rebuildChunk(level, mesh);
+                            SectionCache.end();
                             built++;
                             Throttle.checkpoint();
                         } else {
@@ -154,6 +156,7 @@ final class CameraRenderer {
         } finally {
             RenderFlags.bushyLeaves(false);
             RenderFlags.rendering(false);
+            BlockModelViews.clear();
             Throttle.end();
         }
     }
